@@ -1,3 +1,13 @@
+<div align="center">
+  <a name="readme-top"></a>
+
+<img src="docs/images/logo.svg" alt="esclak" width="240" />
+
+[![][license-shield]][license-link]
+[![][pypi-shield]][pypi-link]
+
+</div>
+
 # clak
 
 固定流程脚本 TUI 与无头执行（`StepList` + `ScriptSession`）。
@@ -6,9 +16,8 @@ CLAK = **C**ommand-**L**ine **A**utomation **K**it。
 
 ## 能力
 
-- history / slash 菜单 / 多行输入 / context / ask（单选、多选、过滤）
+- history / slash 菜单 / context / ask（单选、多选、过滤）
 - `/` 补全
-- 脚本：`/pack-game-res`（版本 + 打包目标）、`/select-server`（目标服务器）
 - 无头：`clak exec /pack-game-res --use-defaults` 或 `--set field=value`
 
 ## 目录结构
@@ -47,53 +56,17 @@ src/clak/
 uv sync
 uv run clak                          # 打开 TUI
 uv run clak exec /version             # 无头执行
-uv run clak exec /pack-game-res --set version=1.0 --set targets=base,cn
+uv run pytest                         # 跑测试
 ```
 
 ### 不用 uv（pip + python）
 
 ```bash
-pip install -e .                         # 装依赖 + 入口命令
-python -m clak                        # 打开 TUI
-python -m clak exec /version
-python -m clak exec /pack-game-res --use-defaults
+pip install esclak                    # 装包，得到 clak 命令
+clak                                  # 打开 TUI
+clak exec /version                    # 无头执行
+python -m pytest                      # 跑测试
 ```
-
-若依赖已装（`pip install textual wcwidth`），可直接跑无需安装：
-
-```bash
-python3 -m clak                       # 直接运行
-python3 -m clak exec /version
-python3 -m pytest                        # 跑测试
-```
-
-入口命令：`clak`（pip install 后可用）。PyPI 包名为 `esclak`（绕开 `clack` 相似性），import 名为 `clak`（`from clak... import`）。
-
-```bash
-pip install esclak                            # 装包，得到 clak 命令
-```
-
-## 构建单文件二进制（组内分发）
-
-无需 Python 环境即可分发，用 pyinstaller 打成单文件：
-
-```bash
-./build.sh                               # 产出上级目录的 clak 二进制
-```
-
-部署到游戏代码仓库时，目录约定：
-
-```
-tools/
-├── clak_src/                            # clak 源码（入库）
-│   ├── build.sh
-│   └── src/...
-└── clak                                 # 构建产物（gitignore，不入库）
-```
-
-组员拉代码后，在 `tools/clak_src/` 执行 `./build.sh` 即生成 `tools/clak`，直接 `./tools/clak` 使用。
-
-> 跨平台需分别构建：macOS 上构建得到 macOS 二进制，Linux 同理。onefile 模式首次启动会解压到临时目录，约慢几百毫秒。
 
 ## 无头执行
 
@@ -153,10 +126,13 @@ def run(session: ScriptSession) -> None:
 
 在 `src/clak/commands/` 新建模块，定义 `COMMAND = SlashCommand(...)`，加入 `commands/_registry.py` 的 `_BUILTINS`。
 
-## 测试
+## 许可
 
-```bash
-python -m pytest                    # 或 uv run pytest
-```
+[MIT](LICENSE)
 
-测试覆盖：reducer、headless、pack_game_res、select_server、ask（view/multi/navigation）、view_lifecycle、tui_script、exec_list、key_from_textual。
+<!-- 徽章引用 -->
+
+[license-shield]: https://img.shields.io/badge/license-MIT-blue.svg
+[license-link]: LICENSE
+[pypi-shield]: https://img.shields.io/pypi/v/esclak.svg
+[pypi-link]: https://pypi.org/project/esclak/
