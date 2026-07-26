@@ -1,10 +1,10 @@
 # AGENTS.md — 接入 Script 指南
 
-给 AI agent 的工作指南：把散落的游戏脚本接入 clak-py 框架。
+给 AI agent 的工作指南：把散落的游戏脚本接入 clak 框架。
 
 ## 何时接入
 
-满足任一即接入 clak-py：
+满足任一即接入 clak：
 
 - 有固定流程（多步骤、有顺序依赖）
 - 需要人工确认参数（版本号、目标服务器、打包配置）
@@ -15,17 +15,17 @@
 
 ## 接入流程
 
-### 1. 在 `src/clak_py/scripts/` 新建模块
+### 1. 在 `src/clak/scripts/` 新建模块
 
 文件名非下划线开头（`_registry.py` 等被扫描跳过）。一个脚本一个文件。
 
 ### 2. 用 `@script` 装饰 `run` 函数
 
 ```python
-# src/clak_py/scripts/my_script.py
-from clak_py.runtime.ask import AskAnswer, AskChoice, AskRequest
-from clak_py.runtime.session import ScriptSession
-from clak_py.scripts import script
+# src/clak/scripts/my_script.py
+from clak.runtime.ask import AskAnswer, AskChoice, AskRequest
+from clak.runtime.session import ScriptSession
+from clak.scripts import script
 
 
 @script("/my-script", "脚本说明（TUI 菜单展示）")
@@ -62,13 +62,13 @@ def run(session: ScriptSession) -> None:
 
 ```bash
 # 无头：缺参报错
-python3 -m clak_py exec /my-script
+python3 -m clak exec /my-script
 # 无头：补参执行
-python3 -m clak_py exec /my-script --set field=x
+python3 -m clak exec /my-script --set field=x
 # 无头：用默认值批量
-python3 -m clak_py exec /my-script --use-defaults
+python3 -m clak exec /my-script --use-defaults
 # TUI 交互
-python3 -m clak_py
+python3 -m clak
 # 然后输入 /my-script
 ```
 
@@ -77,9 +77,9 @@ python3 -m clak_py
 参考 `tests/test_pack_game_res.py`：
 
 ```python
-from clak_py.runtime.params import ScriptInputs
-from clak_py.runtime.session import ScriptSession
-from clak_py.scripts.my_script import run
+from clak.runtime.params import ScriptInputs
+from clak.runtime.session import ScriptSession
+from clak.scripts.my_script import run
 
 
 def test_my_script_prefill():
@@ -141,7 +141,7 @@ AskRequest(
 ### 多选 ask
 
 ```python
-from clak_py.runtime.ask import AskMode
+from clak.runtime.ask import AskMode
 
 AskRequest(
     field_id="targets",
@@ -172,7 +172,7 @@ AskRequest(
 ### fzf 式过滤单选
 
 ```python
-from clak_py.runtime.ask import AskMode
+from clak.runtime.ask import AskMode
 
 AskRequest(
     field_id="server",
@@ -218,11 +218,11 @@ step_list.add(state["need_x"], step_optional, "optional")  # can_do 控制是否
 
 接入一个脚本前确认：
 
-- [ ] 文件在 `src/clak_py/scripts/` 下，文件名非下划线开头
+- [ ] 文件在 `src/clak/scripts/` 下，文件名非下划线开头
 - [ ] `@script("/xxx", "说明")` 装饰 `run`，slash 名带斜杠
 - [ ] `run(session)` 签名，内部 `bind_step_end()` + `step_list.clear()` + `add(...)` + `session.run()`
 - [ ] `ask_step` 的 `field_id` 唯一，`on_answer` 回调更新 state
-- [ ] `python3 -m clak_py exec /xxx` 缺参报错码 2
-- [ ] `python3 -m clak_py exec /xxx --set field=v` 执行成功
+- [ ] `python3 -m clak exec /xxx` 缺参报错码 2
+- [ ] `python3 -m clak exec /xxx --set field=v` 执行成功
 - [ ] TUI 里 `/xxx` 能交互
 - [ ] 写了测试，`python3 -m pytest` 全绿

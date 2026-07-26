@@ -1,5 +1,5 @@
-from clak_py.runtime.ask import AskChoice, AskMode, AskRequest
-from clak_py.tui.views.ask import (
+from clak.runtime.ask import AskChoice, AskMode, AskRequest
+from clak.tui.views.ask import (
     encode_multi_answer,
     indices_from_default,
     init_for_request,

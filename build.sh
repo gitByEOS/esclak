@@ -29,11 +29,11 @@ pyinstaller \
     --workpath "$BUILD_DIR/work" \
     --specpath "$BUILD_DIR" \
     --collect-all textual \
-    --collect-submodules clak_py.scripts \
-    --collect-submodules clak_py.commands \
+    --collect-submodules clak.scripts \
+    --collect-submodules clak.commands \
     --clean \
     --noconfirm \
-    src/clak_py/__main__.py
+    src/clak/__main__.py
 
 deactivate
 

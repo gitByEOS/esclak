@@ -1,6 +1,6 @@
 [project]
-name = "clak-py"
-version = "0.1.0"
+name = "esclak"
+dynamic = ["version"]
 description = "固定流程脚本 TUI 与无头执行"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -10,18 +10,20 @@ dependencies = [
 ]
 
 [project.scripts]
-clak-py = "clak_py.cli:main"
-clak = "clak_py.cli:main"
+clak = "clak.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "src/clak/__init__.py"
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/clak_py"]
+packages = ["src/clak"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/clak_py", "README.md"]
+include = ["src/clak", "README.md"]
 
 [dependency-groups]
 dev = [

@@ -1,6 +1,6 @@
-from clak_py.runtime.ask import AskChoice, AskMode, AskRequest
-from clak_py.tui.event import TuiEvent, TuiKey
-from clak_py.tui.state import TuiState
+from clak.runtime.ask import AskChoice, AskMode, AskRequest
+from clak.tui.event import TuiEvent, TuiKey
+from clak.tui.state import TuiState
 
 
 def test_multi_ask_space_toggles_and_enter_submits():

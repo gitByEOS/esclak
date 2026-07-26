@@ -1,6 +1,6 @@
-from clak_py.tui.views import ask as ask_view
-from clak_py.tui.event import TuiEvent, TuiKey
-from clak_py.tui.state import TuiState
+from clak.tui.views import ask as ask_view
+from clak.tui.event import TuiEvent, TuiKey
+from clak.tui.state import TuiState
 
 
 def test_enter_ask_updates_context_immediately():

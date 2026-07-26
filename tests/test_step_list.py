@@ -1,4 +1,4 @@
-from clak_py.runtime.step_list import StepList
+from clak.runtime.step_list import StepList
 
 
 def test_step_list_runs_sync_steps_in_one_execute():

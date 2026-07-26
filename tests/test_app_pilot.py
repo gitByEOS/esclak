@@ -1,6 +1,6 @@
 import asyncio
 
-from clak_py.tui.app import ClakApp
+from clak.tui.app import ClakApp
 
 
 def test_typing_does_not_crash():

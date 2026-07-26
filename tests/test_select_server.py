@@ -1,6 +1,6 @@
-from clak_py.runtime.params import ScriptInputs
-from clak_py.runtime.session import ScriptSession
-from clak_py.scripts.select_server import SERVER_DEFAULT, run as run_select_server
+from clak.runtime.params import ScriptInputs
+from clak.runtime.session import ScriptSession
+from clak.scripts.select_server import SERVER_DEFAULT, run as run_select_server
 
 
 def test_select_server_prefill():
@@ -24,7 +24,7 @@ def test_select_server_gate_and_provide():
 
 
 def test_select_server_exec_default():
-    from clak_py.runtime.headless import run_line
+    from clak.runtime.headless import run_line
 
     run = run_line("/select-server", script_inputs=ScriptInputs(allow_defaults=True))
     assert run.exit_code == 0

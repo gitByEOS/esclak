@@ -1,6 +1,6 @@
-from clak_py.scripts.pack_game_res import default_pack_version, run as run_pack_game_res
-from clak_py.runtime.params import ScriptInputs
-from clak_py.runtime.session import ScriptSession
+from clak.scripts.pack_game_res import default_pack_version, run as run_pack_game_res
+from clak.runtime.params import ScriptInputs
+from clak.runtime.session import ScriptSession
 
 
 def test_pack_game_res_custom_version():
@@ -32,7 +32,7 @@ def test_pack_game_res_with_prefill():
 
 
 def test_pack_game_res_exec_defaults_non_interactive():
-    from clak_py.runtime.headless import run_line
+    from clak.runtime.headless import run_line
 
     run = run_line("/pack-game-res", script_inputs=ScriptInputs(allow_defaults=True))
     assert run.exit_code == 0

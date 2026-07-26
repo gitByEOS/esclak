@@ -1,6 +1,6 @@
 from textual import events
 
-from clak_py.tui.app import key_from_textual
+from clak.tui.app import key_from_textual
 
 
 def test_key_from_textual_printable():

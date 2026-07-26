@@ -1,6 +1,6 @@
-from clak_py.tui.event import TuiEvent, TuiKey
-from clak_py.tui.state import TuiState
-from clak_py.tui.views import ask as ask_view
+from clak.tui.event import TuiEvent, TuiKey
+from clak.tui.state import TuiState
+from clak.tui.views import ask as ask_view
 
 
 def test_filter_typing_narrows_choices():

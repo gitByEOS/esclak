@@ -1,5 +1,5 @@
-from clak_py.tui.event import TuiEvent, TuiKey, TuiOutcome
-from clak_py.tui.state import TuiState
+from clak.tui.event import TuiEvent, TuiKey, TuiOutcome
+from clak.tui.state import TuiState
 
 
 def test_tui_pack_game_res_ask_and_default():
