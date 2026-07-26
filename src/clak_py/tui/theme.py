@@ -1,0 +1,10 @@
+"""ANSI 名到 Rich 色名的映射在 view 层完成。"""
+
+INPUT_RULE = "bright_black"
+MENU_NORMAL = "white"
+MENU_SELECTED = "cyan"
+SLASH_COMPLETE = "green"
+SLASH_UNKNOWN = "dark_orange3"
+SLASH_TYPING = "yellow"
+ASK_ACCENT = "cyan"
+ASK_RULE = "cyan"
