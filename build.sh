@@ -29,7 +29,6 @@ pyinstaller \
     --workpath "$BUILD_DIR/work" \
     --specpath "$BUILD_DIR" \
     --collect-all textual \
-    --collect-submodules clak.scripts \
     --collect-submodules clak.commands \
     --clean \
     --noconfirm \

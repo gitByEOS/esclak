@@ -4,28 +4,27 @@ import subprocess
 import time
 from typing import Literal
 
-from clak.commands._registry import run_script
+from clak.application import Clak, FooterViewData
 from clak.runtime.ask import AskRequest
+from clak.runtime.errors import ScriptError
+from clak.runtime.output import OutputView
 from clak.runtime.params import ScriptInputs
-from clak.runtime.session import ScriptSession
+from clak.runtime.session import Session
 from clak.tui.views import ask as ask_view
-from clak.tui.views import context as context_view
+from clak.tui.views import footer as footer_view
 from clak.tui.views.ask_controller import AskUiBindings, handle_ask_key, sync_view_for_request
 from clak.tui.views.ask import AskViewState
 from clak.tui.views.command_menu import CommandViewState
 from clak.tui.event import TuiEvent, TuiKey, TuiOutcome
 from clak.tui.views.history import HistoryEntryKind, HistoryView, role_style
 from clak.tui.views.input import InputView
-from clak.runtime.slash import (
-    SlashAction,
-    SlashEngine,
-    SlashTokenKind,
-)
+from clak.runtime.slash import SlashAction, SlashTokenKind
 
 
 class TuiState:
-    def __init__(self) -> None:
-        self.slash_engine = SlashEngine()
+    def __init__(self, app: Clak | None = None) -> None:
+        self.app = app or Clak()
+        self.slash_engine = self.app.slash_engine
         self.input_view = InputView()
         self.history_view = HistoryView()
         self.command_view = CommandViewState()
@@ -34,29 +33,29 @@ class TuiState:
         self.ask_view = AskViewState()
         self._ask_field_id: str | None = None
         self._deferred_ask_wire: str | None = None
-        self.script_session: ScriptSession | None = None
+        self.session: Session | None = None
         self.primary: Literal["input", "ask"] = "input"
         self.overlay: Literal["none", "command"] = "none"
         self.started_at = time.monotonic()
         self.branch = _current_branch()
-        self.context_line: str = context_view.format_context(self.branch, 0)
+        self.footer_line: str = footer_view.format_footer(self.branch, 0)
         self._sync_surface()
         self.history_view.push(
             HistoryEntryKind.ASSISTANT,
-            "clak 就绪；输入 / 查看命令。",
+            "clak 就绪；输入字母搜索命令。",
         )
 
     def uptime_seconds(self) -> int:
         return int(time.monotonic() - self.started_at)
 
     def tick(self) -> None:
-        """每秒由定时器触发，刷新 context_line 中的运行时长。"""
+        """每秒由定时器触发，刷新 footer_line 中的运行时长。"""
         self._sync_surface()
 
     def script_ask_request(self) -> AskRequest | None:
-        if not self.script_session or not self.script_session.is_awaiting_input:
+        if not self.session or not self.session.is_awaiting_input:
             return None
-        return self.script_session.pending_request
+        return self.session.pending_request
 
     def is_ask_choosing(self) -> bool:
         return self.script_ask_request() is not None
@@ -72,19 +71,35 @@ class TuiState:
 
     def after_present(self) -> None:
         wire = self._deferred_ask_wire
-        if not wire or not self.script_session:
+        if not wire or not self.session:
             return
-        request = self.script_session.pending_request
+        request = self.session.pending_request
         if not request:
             self._deferred_ask_wire = None
             return
-        self.script_session.provide_input(request.field_id, wire)
+        try:
+            self.session.provide_input(request.field_id, wire)
+        except (ScriptError, ValueError) as error:
+            self.session.cancel()
+            self.session = None
+            self.history_view.push(HistoryEntryKind.ERROR, str(error))
         self._deferred_ask_wire = None
         self._sync_ask_view()
         self._sync_surface()
 
     def role_style(self, role: str) -> tuple[str, str]:
         return role_style(role)
+
+    def footer_content(self) -> str:
+        return self.app.footer_view(
+            FooterViewData(
+                branch=self.branch,
+                uptime_seconds=self.uptime_seconds(),
+                primary=self.primary,
+                overlay=self.overlay,
+                hint=self.footer_line,
+            )
+        )
 
     def handle_event(self, event: TuiEvent) -> TuiOutcome:
         outcome = self._handle_event_impl(event)
@@ -106,39 +121,39 @@ class TuiState:
             overlay = "none"
         if primary != self.primary:
             self.primary = primary
-            self.context_line = self._primary_context(primary)
+            self.footer_line = self._primary_footer(primary)
         elif primary == "input":
-            self.context_line = self._input_context()
+            self.footer_line = self._input_footer()
         if overlay != self.overlay:
             self.overlay = overlay
         if overlay != "none":
-            self.context_line = self._overlay_context(overlay)
+            self.footer_line = self._overlay_footer(overlay)
         elif primary == "ask":
-            self.context_line = self._ask_context()
+            self.footer_line = self._ask_footer()
 
-    def _primary_context(self, primary: Literal["input", "ask"]) -> str:
+    def _primary_footer(self, primary: Literal["input", "ask"]) -> str:
         if primary == "input":
-            return self._input_context()
-        return self._ask_context()
+            return self._input_footer()
+        return self._ask_footer()
 
-    def _overlay_context(self, overlay: Literal["none", "command"]) -> str:
+    def _overlay_footer(self, overlay: Literal["none", "command"]) -> str:
         if overlay == "command":
-            return "命令菜单 · ↑↓ 选择 · Tab 补全 · Esc 关闭"
+            return "命令菜单 · ↑↓ 选择 · Enter 执行 · Tab 补全 · Esc 关闭"
         return ""
 
-    def _input_context(self) -> str:
-        return context_view.format_context(self.branch, self.uptime_seconds())
+    def _input_footer(self) -> str:
+        return footer_view.format_footer(self.branch, self.uptime_seconds())
 
-    def _ask_context(self) -> str:
+    def _ask_footer(self) -> str:
         return ask_view.status_hint_ask(self.script_ask_request())
 
-    def _set_ask_context(self, line: str) -> None:
+    def _set_ask_footer(self, line: str) -> None:
         if self.primary == "ask":
-            self.context_line = line
+            self.footer_line = line
 
-    def _refresh_input_context(self) -> None:
+    def _refresh_input_footer(self) -> None:
         if self.primary == "input" and self.overlay == "none":
-            self.context_line = self._input_context()
+            self.footer_line = self._input_footer()
 
     def _handle_event_impl(self, event: TuiEvent) -> TuiOutcome:
         if event.resize_width is not None:
@@ -189,7 +204,7 @@ class TuiState:
             pending=pending,
             submit_wire=self._submit_ask_wire,
             cancel_script=self._cancel_script,
-            set_context_line=lambda line: self._set_ask_context(line),
+            set_footer_line=lambda line: self._set_ask_footer(line),
         )
 
     def _dispatch_ask_key(self, key: TuiKey) -> TuiOutcome:
@@ -207,9 +222,9 @@ class TuiState:
         return TuiOutcome.REDRAW
 
     def _cancel_script(self) -> TuiOutcome:
-        if self.script_session:
-            self.script_session.cancel()
-            self.script_session = None
+        if self.session:
+            self.session.cancel()
+            self.session = None
         self._deferred_ask_wire = None
         self.ask_view = AskViewState()
         self.history_view.push(HistoryEntryKind.SYSTEM, "已中断脚本，返回主界面")
@@ -217,7 +232,8 @@ class TuiState:
 
     def _handle_command_key(self, key: TuiKey) -> TuiOutcome | None:
         if key.kind == "escape":
-            self.command_view.open = False
+            self.input_view.take()
+            self._refresh_command_view()
             return TuiOutcome.REDRAW
         if key.kind == "up":
             self._command_move(-1)
@@ -235,12 +251,8 @@ class TuiState:
             self._accept_command_selection()
             return self._submit_line()
         if key.kind == "tab":
-            name = self.slash_engine.tab_completion(
-                self.input_view.input, self.command_view.selected
-            )
-            if name:
-                self.input_view.set(name, self.terminal_width)
-                self._refresh_command_view()
+            self._accept_command_selection()
+            self._refresh_command_view()
             return TuiOutcome.REDRAW
         return None
 
@@ -300,7 +312,7 @@ class TuiState:
             return TuiOutcome.QUIT
         self.input_view.take()
         self._refresh_command_view()
-        self._refresh_input_context()
+        self._refresh_input_footer()
         return TuiOutcome.REDRAW
 
     def _submit_line(self) -> TuiOutcome:
@@ -308,10 +320,12 @@ class TuiState:
         line = raw.rstrip()
         self._refresh_command_view()
         if not line.strip():
-            self._refresh_input_context()
+            self._refresh_input_footer()
             return TuiOutcome.REDRAW
         if line.startswith("/"):
             return self._dispatch_slash_line(line)
+        if _is_command_query(line):
+            return self._dispatch_slash_line(f"/{line}")
         return self._run_prompt(line)
 
     def _dispatch_slash_line(self, line: str) -> TuiOutcome:
@@ -338,20 +352,24 @@ class TuiState:
         return TuiOutcome.REDRAW
 
     def _start_script(self, script_id: str) -> None:
-        def log(message: str) -> None:
-            self.history_view.push(HistoryEntryKind.SYSTEM, message)
-
-        session = ScriptSession(
-            log,
+        script = self.app.create_script(script_id)
+        if not script:
+            self.history_view.push(HistoryEntryKind.ERROR, f"未知脚本: {script_id}")
+            return
+        output_view = script.output
+        self.history_view.attach(output_view)
+        session = Session(
+            output_view,
             inputs=ScriptInputs(allow_defaults=False),
         )
-        session.on_finished(lambda: self._clear_script_session(session))
-        self.script_session = session
+        session.on_exit(lambda: self._clear_session(session, script))
+        self.session = session
         try:
-            run_script(session, script_id)
-        except ValueError as error:
+            script.on_enter(session)
+            script.run(session)
+        except (NotImplementedError, ScriptError, ValueError) as error:
+            session.cancel()
             self.history_view.push(HistoryEntryKind.ERROR, str(error))
-            self.script_session = None
             return
         session._sync_running()
         if self.script_ask_request():
@@ -359,9 +377,11 @@ class TuiState:
                 self.script_ask_request(), self._ask_field_id, self.ask_view
             )
 
-    def _clear_script_session(self, session: ScriptSession) -> None:
-        if self.script_session is session:
-            self.script_session = None
+    def _clear_session(self, session: Session, script) -> None:
+        script.on_exit()
+        self.history_view.detach(script.output)
+        if self.session is session:
+            self.session = None
 
     def _run_prompt(self, prompt: str) -> TuiOutcome:
         self.history_view.push(HistoryEntryKind.USER, prompt)
@@ -369,7 +389,7 @@ class TuiState:
         return TuiOutcome.REDRAW
 
     def _refresh_command_view(self) -> None:
-        self.command_view.open = self.input_view.input.startswith("/")
+        self.command_view.open = _is_command_query(self.input_view.input)
         if not self.command_view.open:
             self.command_view.selected = 0
             self.command_view.matches.clear()
@@ -399,6 +419,10 @@ class TuiState:
         return self.slash_engine.token_kind(token)
 
 
+def _is_command_query(text: str) -> bool:
+    return bool(text) and (text.startswith("/") or text[0].isalpha())
+
+
 def _current_branch() -> str:
     """读取当前 git 分支名，detached 或非 git 仓库时退化到 clak。"""
     try:
@@ -422,4 +446,3 @@ def _current_branch() -> str:
         return result.stdout.strip() or "clak"
     except (subprocess.SubprocessError, OSError):
         return "clak"
-

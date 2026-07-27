@@ -4,37 +4,16 @@ from clak.commands import (
     status,
     version,
 )
-from clak.commands.types import ScriptEntry, SlashCommand, SlashEntry
-from clak.runtime.session import ScriptSession
-from clak.scripts._registry import all_scripts
+from collections.abc import Callable
 
-_BUILTINS: tuple[SlashCommand, ...] = (
-    clear.COMMAND,
-    version.COMMAND,
-    status.COMMAND,
-    quit.COMMAND,
-)
-
-COMMANDS: tuple[SlashEntry, ...] = _BUILTINS + all_scripts()
+from clak.commands.types import SlashCommand
 
 
-def command_for_token(token: str) -> SlashEntry | None:
-    needle = token.lower()
-    for cmd in COMMANDS:
-        if needle in cmd.all_names():
-            return cmd
-    return None
-
-
-def script_command(script_id: str) -> ScriptEntry | None:
-    for cmd in all_scripts():
-        if cmd.script_id == script_id:
-            return cmd
-    return None
-
-
-def run_script(session: ScriptSession, script_id: str) -> None:
-    cmd = script_command(script_id)
-    if not cmd:
-        raise ValueError(f"未知脚本: {script_id}")
-    cmd.script_run(session)
+def builtin_commands(status_provider: Callable[[], str]) -> tuple[SlashCommand, ...]:
+    """返回每个 Clak 应用独享的基础命令。"""
+    return (
+        clear.COMMAND,
+        version.COMMAND,
+        status.command(status_provider),
+        quit.COMMAND,
+    )

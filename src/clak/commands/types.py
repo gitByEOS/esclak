@@ -4,7 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from clak.runtime.session import ScriptSession
+from clak.runtime.output import OutputView
+from clak.runtime.session import Session
 
 
 class SlashAction(Enum):
@@ -18,8 +19,16 @@ class SlashAction(Enum):
 
 @dataclass(frozen=True)
 class SlashMatch:
+    """命令菜单中的匹配项。"""
+
     name: str
     description: str
+    matched_indices: tuple[int, ...] = ()
+    display_name: str | None = None
+
+    @property
+    def label(self) -> str:
+        return self.display_name or self.name
 
 
 @dataclass
@@ -38,7 +47,6 @@ class SlashTokenKind(Enum):
 
 
 SlashHandler = Callable[[], SlashDispatchResult]
-ScriptRunner = Callable[[ScriptSession], None]
 
 
 @dataclass(frozen=True)
@@ -54,18 +62,56 @@ class SlashCommand:
         return (self.name, *self.aliases)
 
 
+class Script:
+    """业务脚本基类，每次执行都会创建一个新实例。"""
+
+    name = ""
+    description = ""
+    aliases: tuple[str, ...] = ()
+    output_view = OutputView
+
+    def __init__(self) -> None:
+        self.output = self.output_view()
+        self.output.set_prefix(f"[{self.name.removeprefix('/')}] ")
+
+    def on_enter(self, session: Session) -> None:
+        self.output.on_enter(session)
+
+    def on_exit(self) -> None:
+        self.output.on_exit()
+
+    def run(self, session: Session) -> None:
+        raise NotImplementedError
+
+
 @dataclass(frozen=True)
 class ScriptEntry:
-    """脚本入口：slash 名 + 脚本 runner。"""
+    """已注册脚本的元数据与实例工厂。"""
 
-    name: str
-    aliases: tuple[str, ...]
-    description: str
-    script_id: str
-    script_run: ScriptRunner
+    script_type: type[Script]
+
+    @property
+    def name(self) -> str:
+        return self.script_type.name
+
+    @property
+    def description(self) -> str:
+        return self.script_type.description
+
+    @property
+    def aliases(self) -> tuple[str, ...]:
+        return self.script_type.aliases
+
+    @property
+    def script_id(self) -> str:
+        return self.name.removeprefix("/")
 
     def all_names(self) -> tuple[str, ...]:
         return (self.name, *self.aliases)
 
+    def create(self) -> Script:
+        return self.script_type()
+
 
 SlashEntry = SlashCommand | ScriptEntry
+RegisterEntry = SlashCommand | type[Script]

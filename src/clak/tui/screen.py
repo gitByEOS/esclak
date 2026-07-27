@@ -7,12 +7,12 @@ from rich.console import Console, ConsoleOptions, RenderResult
 
 from clak.tui.views import ask as ask_view_mod
 from clak.tui.views import command_menu as command_view_mod
-from clak.tui.views import context as context_view_mod
+from clak.tui.views import footer as footer_view_mod
 from clak.tui.views import history as history_view_mod
 from clak.tui.views import input as input_view_mod
 from clak.tui.state import TuiState
 
-CONTEXT_LINE_HEIGHT = 1
+FOOTER_HEIGHT = 1
 INPUT_MIN_HEIGHT = 1
 INPUT_BORDER_ROWS = 2
 
@@ -54,7 +54,7 @@ def compute_layout(area_width: int, area_height: int, state: TuiState) -> ViewLa
             overlay_block = 0
         input_block = input_content + INPUT_BORDER_ROWS
     while True:
-        fixed = input_block + overlay_block + CONTEXT_LINE_HEIGHT
+        fixed = input_block + overlay_block + FOOTER_HEIGHT
         if fixed < height:
             break
         if overlay_block > 0:
@@ -67,7 +67,7 @@ def compute_layout(area_width: int, area_height: int, state: TuiState) -> ViewLa
             continue
         input_block = INPUT_MIN_HEIGHT + INPUT_BORDER_ROWS
         break
-    history_height = max(1, height - input_block - overlay_block - CONTEXT_LINE_HEIGHT)
+    history_height = max(1, height - input_block - overlay_block - FOOTER_HEIGHT)
     return ViewLayout(history_height, overlay_block, input_block)
 
 
@@ -125,6 +125,6 @@ class ClakRenderable:
                 self._cursor,
             )
 
-        yield from context_view_mod.render_context(
-            self.state.context_line, width
+        yield from footer_view_mod.render_footer(
+            self.state.footer_content(), width
         )

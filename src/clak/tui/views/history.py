@@ -6,6 +6,7 @@ from rich.console import RenderResult
 from rich.segment import Segment
 from rich.style import Style
 
+from clak.runtime.output import OutputView
 ROLE_STYLES: dict[str, tuple[str, str]] = {
     "user": ("You", "cyan"),
     "assistant": ("Assistant", "green"),
@@ -19,6 +20,7 @@ class HistoryEntryKind(Enum):
     ASSISTANT = auto()
     SYSTEM = auto()
     ERROR = auto()
+    OUTPUT = auto()
 
     def role_str(self) -> str:
         match self:
@@ -30,6 +32,8 @@ class HistoryEntryKind(Enum):
                 return "system"
             case HistoryEntryKind.ERROR:
                 return "error"
+            case HistoryEntryKind.OUTPUT:
+                return "output"
 
 
 class HistoryEntry:
@@ -43,6 +47,7 @@ class HistoryEntry:
 class HistoryView:
     def __init__(self) -> None:
         self.entries: list[HistoryEntry] = []
+        self.output_views: list[OutputView] = []
         self.scroll: int = 0
 
     def push(self, kind: HistoryEntryKind, text: str) -> None:
@@ -58,12 +63,28 @@ class HistoryView:
     def scroll_down(self) -> None:
         self.scroll += 1
 
+    def attach(self, output_view: OutputView) -> None:
+        self.output_views.append(output_view)
+
+    def detach(self, output_view: OutputView) -> None:
+        if output_view in self.output_views:
+            self.output_views.remove(output_view)
+            lines = output_view.render_lines()
+            if lines:
+                self.entries.append(HistoryEntry(HistoryEntryKind.OUTPUT, "\n".join(lines)))
+
     def display(self) -> str:
         lines: list[str] = []
         for entry in self.entries:
-            label = role_label(entry.kind)
-            lines.append(f"{label}: {entry.text}")
+            if entry.kind == HistoryEntryKind.OUTPUT:
+                lines.extend(entry.text.split("\n"))
+            else:
+                label = role_label(entry.kind)
+                lines.append(f"{label}: {entry.text}")
+        for output_view in self.output_views:
+            lines.extend(output_view.render_lines())
         return "\n".join(lines)
+
 
 
 def role_label(kind: HistoryEntryKind) -> str:
@@ -77,6 +98,8 @@ def role_style(role: str) -> tuple[str, str]:
 
 
 def entry_lines(entry: HistoryEntry) -> list[str]:
+    if entry.kind == HistoryEntryKind.OUTPUT:
+        return entry.text.split("\n")
     role = entry.kind.role_str()
     label, _ = role_style(role)
     prefix = f"{label}: "
@@ -99,6 +122,8 @@ def render_history(
     lines: list[str] = []
     for entry in history.entries:
         lines.extend(entry_lines(entry))
+    for output_view in history.output_views:
+        lines.extend(output_view.render_lines())
     scroll = history.scroll
     visible = lines[scroll : scroll + height] if lines else [""]
     while len(visible) < height:

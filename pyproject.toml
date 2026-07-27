@@ -9,6 +9,11 @@ dependencies = [
     "wcwidth>=0.2.13",
 ]
 
+[project.urls]
+Homepage = "https://github.com/gitByEOS/esclak"
+Repository = "https://github.com/gitByEOS/esclak"
+Examples = "https://github.com/gitByEOS/esclak/tree/master/examples"
+
 [project.scripts]
 clak = "clak.cli:main"
 
@@ -23,12 +28,13 @@ path = "src/clak/__init__.py"
 packages = ["src/clak"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/clak", "README.md"]
+include = ["src/clak", "examples", "docs/images/logo.svg", "README.md", "LICENSE"]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "pytest>=8.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

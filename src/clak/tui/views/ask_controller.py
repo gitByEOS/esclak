@@ -18,7 +18,7 @@ class AskUiBindings:
     pending: AskRequest
     submit_wire: Callable[[str], TuiOutcome]
     cancel_script: Callable[[], TuiOutcome]
-    set_context_line: Callable[[str], None]
+    set_footer_line: Callable[[str], None]
 
 
 def sync_view_for_request(
@@ -58,7 +58,7 @@ def _handle_filter(bindings: AskUiBindings, key: TuiKey) -> TuiOutcome | None:
     if key.kind == "enter":
         filtered = ask_view.filtered_choices(request, view.query)
         if not filtered:
-            bindings.set_context_line("无匹配项")
+            bindings.set_footer_line("无匹配项")
             return TuiOutcome.REDRAW
         idx = min(view.selected, len(filtered) - 1)
         choice = filtered[idx]
@@ -144,7 +144,7 @@ def _handle_custom_input(bindings: AskUiBindings, key: TuiKey) -> TuiOutcome | N
     if key.kind == "enter":
         line = ask_view.inline_draft_text(bindings.input_view).strip()
         if not line:
-            bindings.set_context_line("输入不能为空")
+            bindings.set_footer_line("输入不能为空")
             return TuiOutcome.REDRAW
         bindings.input_view.take()
         return bindings.submit_wire(line)

@@ -2,9 +2,10 @@
 
 INPUT_RULE = "bright_black"
 MENU_NORMAL = "white"
-MENU_SELECTED = "cyan"
+MENU_SELECTED = "bright_white"
 SLASH_COMPLETE = "green"
 SLASH_UNKNOWN = "dark_orange3"
 SLASH_TYPING = "yellow"
+COMMAND_MATCH = "yellow"
 ASK_ACCENT = "cyan"
 ASK_RULE = "cyan"

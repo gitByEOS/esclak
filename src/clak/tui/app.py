@@ -5,6 +5,7 @@ from textual.app import App, ComposeResult
 from textual.geometry import Offset
 from textual.widgets import Static
 
+from clak.application import Clak
 from clak.tui.event import TuiEvent, TuiKey, TuiOutcome
 from clak.tui.state import TuiState
 from clak.tui.screen import ClakRenderable
@@ -129,9 +130,6 @@ class ClakView(Static):
 
 class ClakApp(App):
     CSS = """
-    Screen {
-        background: #0d1117;
-    }
     ClakView {
         width: 100%;
         height: 100%;
@@ -140,9 +138,9 @@ class ClakApp(App):
 
     BINDINGS = [("ctrl+q", "quit", "退出")]
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.state = TuiState()
+    def __init__(self, app: Clak | None = None) -> None:
+        super().__init__(ansi_color=True)
+        self.state = TuiState(app)
 
     def compose(self) -> ComposeResult:
         yield ClakView(self.state)
@@ -151,5 +149,5 @@ class ClakApp(App):
         self.exit()
 
 
-def run_tui() -> None:
-    ClakApp().run()
+def run_tui(app: Clak | None = None) -> None:
+    ClakApp(app).run()
