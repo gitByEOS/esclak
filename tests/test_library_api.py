@@ -69,7 +69,7 @@ def test_application_registers_script_resource():
         name = "/deploy"
         description = "发布"
 
-        def run(self, session: Session) -> None:
+        def run(self) -> None:
             self.output.push("完成")
 
     app.register(DeployScript)
@@ -84,13 +84,14 @@ def test_script_creates_an_independent_output_view_for_each_run():
         description = "发布"
 
         def on_enter(self, session: Session) -> None:
+            super().on_enter(session)
             scripts.append(self)
             self.output.push("进入发布")
 
-        def run(self, session: Session) -> None:
-            session.bind_step_end()
-            session.step_list.add(True, lambda: self.output.push("发布完成") or 0, "deploy")
-            session.run()
+        def run(self) -> None:
+            self._session.bind_exec_end()
+            self._session.exec_list.add(True, lambda: self.output.push("发布完成") or 0, "deploy")
+            self._session.run()
 
     app = Clak()
     app.register(DeployScript)

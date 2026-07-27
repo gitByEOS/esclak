@@ -6,7 +6,12 @@
 
 # clak
 
-可嵌入的固定流程脚本 TUI 与无头执行，支持步骤编排、交互提问、动态状态和脚本级输出视图。
+**C**ommand · **L**ines · **A**ggregator · **K**it
+
+- `clak` 是一个仿 `claude cli tui` 的聚合器，可以给散落脚本一个统一入口
+- 支持：tui 交互模式 和 exec 无头模式
+- 支持：模糊搜索、自定义脚本注入
+- 支持：步骤编排、交互提问、动态状态和脚本级输出视图
 
 ## 安装
 
@@ -19,22 +24,21 @@ pip install esclak
 ## 最小应用
 
 ```python
-from clak import Clak, Script, Session
+from clak import Clak, Script
 
 
 class DeployScript(Script):
     name = "/deploy"
     description = "发布服务"
 
-    def run(self, session: Session) -> None:
+    def run(self) -> None:
         def publish() -> int:
             self.output.push("开始发布 staging")
             self.output.push("发布完成")
             return 0
 
-        session.bind_step_end()
-        session.step_list.add(True, publish, "publish")
-        session.run()
+        self.add_step(True, publish, "publish")
+        self.run_steps()
 
 
 app = Clak(status="发布工具 · staging")
@@ -87,15 +91,15 @@ print(run.text)
 raise SystemExit(run.exit_code)
 ```
 
-## 步骤协议
+## 执行队列
 
-`session.step_list.add(can_do, step, name)` 中：
+`session.exec_list.add(can_do, task, name)` 中：
 
-- `can_do` 是布尔值或无参判断函数；为假时跳过该步骤。
-- 普通同步步骤返回 `0`，随后继续执行下一步。
-- 非零返回值表示流程挂起，不代表进程失败；`ask_step()` 会负责挂起和恢复。
-- `bind_step_end()` 绑定完成通知，脚本入口必须在 `run()` 前调用。
-- 每次脚本执行都会获得新的 `Session` 和 `StepList`，通常不需要先调用 `clear()`。
+- `can_do` 是布尔值或无参判断函数；为假时跳过该任务。
+- 普通同步任务返回 `0`，随后继续执行下一项。
+- 非零返回值表示队列挂起，不代表进程失败；`ask_step()` 会负责挂起和恢复。
+- `bind_exec_end()` 绑定队列完成通知，脚本入口必须在 `run()` 前调用。
+- 每次脚本执行都会获得新的 `Session` 和 `ExecList`，通常不需要先调用 `clear()`。
 
 可预期的业务失败使用 `ScriptError`：
 

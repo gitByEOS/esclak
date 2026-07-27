@@ -12,7 +12,7 @@ class VerifyReleaseScript(Script):
     name = "/verify-release"
     description = "运行发布检查（可选择模拟失败）"
 
-    def run(self, session: Session) -> None:
+    def run(self) -> None:
         outcome = "success"
 
         def ask_outcome() -> int:
@@ -21,7 +21,7 @@ class VerifyReleaseScript(Script):
                 outcome = answer.primary
                 self.output.push(f"检查模式：{outcome}")
 
-            return session.ask_step(
+            return self.ask_tool(
                 AskRequest(
                     field_id="outcome",
                     prompt="选择发布检查结果",
@@ -58,7 +58,6 @@ class VerifyReleaseScript(Script):
                 raise ScriptError(f"发布检查失败：{detail}", exit_code=1)
             return 0
 
-        session.bind_step_end()
-        session.step_list.add(True, ask_outcome, "ask_outcome")
-        session.step_list.add(True, run_check, "run_check")
-        session.run()
+        self.add_step(True, ask_outcome, "ask_outcome")
+        self.add_step(True, run_check, "run_check")
+        self.run_steps()

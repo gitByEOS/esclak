@@ -20,7 +20,7 @@ class ScriptInputs:
         return self.values.get(field_id)
 
     def set(self, field_id: str, wire: str) -> None:
-        self.values[field_id] = wire.strip()
+        self.values[field_id] = wire
 
     def resolve_wire(self, field_id: str, default: str) -> str | None:
         wire = self.get(field_id)

@@ -69,7 +69,7 @@ class PackUploadScript(Script):
             self.output.push("已清理临时打包目录")
         super().on_exit()
 
-    def run(self, session: Session) -> None:
+    def run(self) -> None:
         state = PackState()
 
         def ask_version() -> int:
@@ -79,7 +79,7 @@ class PackUploadScript(Script):
                 self.output.push(f"资源版本：{state.version}")
 
             default = default_pack_version()
-            return session.ask_step(
+            return self.ask_tool(
                 AskRequest(
                     field_id="version",
                     prompt="资源包版本号",
@@ -97,7 +97,7 @@ class PackUploadScript(Script):
                 state.targets = answer.tokens
                 self.output.push(f"打包目标：{answer.text}")
 
-            return session.ask_step(
+            return self.ask_tool(
                 AskRequest(
                     field_id="targets",
                     prompt="选择打包目标（可多选）",
@@ -142,13 +142,12 @@ class PackUploadScript(Script):
             self.output.push("已校验 Windows 资源清单")
             return 0
 
-        session.bind_step_end()
-        session.step_list.add(True, ask_version, "ask_version")
-        session.step_list.add(True, ask_targets, "ask_targets")
-        session.step_list.add(True, pack_and_upload, "pack_and_upload")
-        session.step_list.add(
+        self.add_step(True, ask_version, "ask_version")
+        self.add_step(True, ask_targets, "ask_targets")
+        self.add_step(True, pack_and_upload, "pack_and_upload")
+        self.add_step(
             lambda: "win" in (state.targets or frozenset()),
             verify_windows_artifact,
             "verify_windows_artifact",
         )
-        session.run()
+        self.run_steps()

@@ -79,10 +79,10 @@ dev_tools/
 ## 编写脚本时必须理解的约定
 
 1. `app.register(MyScript)` 注册的是脚本类，每次执行都会创建新实例。
-2. `session.bind_step_end()` 负责在全部步骤结束时触发生命周期清理。
-3. `step_list.add(can_do, step, name)` 的 `can_do` 可以是布尔值或运行时判断函数。
-4. 步骤返回 `0` 表示同步继续；非零表示挂起，不是失败退出码。
-5. 需要用户输入时返回 `session.ask_step(...)`，框架会在得到答案后恢复下一步。
+2. `self.add_step(can_do, task, name)` 向本次执行队列追加一步，`can_do` 可以是布尔值或运行时判断函数。
+3. `self.run_steps()` 绑定完成回调并启动执行队列，负责在全部步骤结束时触发生命周期清理。
+4. 任务返回 `0` 表示同步继续；非零表示队列挂起，不是失败退出码。
+5. 需要用户输入时返回 `self.ask_tool(AskRequest(...), on_answer)`，框架会在得到答案后恢复下一项。
 6. 业务失败抛出 `ScriptError`；输入格式错误抛出 `ValueError`。
 7. 临时文件、子进程等资源在 `on_exit()` 清理，完成、失败和用户中断都会调用它。
 

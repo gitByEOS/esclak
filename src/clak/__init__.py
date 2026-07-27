@@ -1,6 +1,6 @@
 """clak：固定流程脚本壳。"""
 
-__version__ = "0.0.6"
+__version__ = "0.1.0"
 
 from clak.application import Clak, FooterViewData
 from clak.commands.types import Script
@@ -10,6 +10,7 @@ from clak.runtime.headless import HeadlessRun
 from clak.runtime.output import OutputView
 from clak.runtime.params import ScriptInputs
 from clak.runtime.session import Session
+from clak.testing import ScriptRun, ScriptTester
 
 __all__ = [
     "AskAnswer",
@@ -23,6 +24,8 @@ __all__ = [
     "Script",
     "ScriptError",
     "ScriptInputs",
+    "ScriptRun",
+    "ScriptTester",
     "Session",
     "__version__",
 ]

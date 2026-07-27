@@ -9,13 +9,13 @@ class SelectGameServerScript(Script):
     name = "/select-game-server"
     description = "选择游戏后端服务器"
 
-    def run(self, session: Session) -> None:
+    def run(self) -> None:
         def ask_game_server() -> int:
             def save(answer: AskAnswer) -> None:
                 context.game_server = answer.primary
                 self.output.push(f"当前后端服已切换为：{context.game_server}")
 
-            return session.ask_step(
+            return self.ask_tool(
                 AskRequest(
                     field_id="game_server",
                     prompt="选择游戏后端服",
@@ -30,6 +30,5 @@ class SelectGameServerScript(Script):
                 save,
             )
 
-        session.bind_step_end()
-        session.step_list.add(True, ask_game_server, "ask_game_server")
-        session.run()
+        self.add_step(True, ask_game_server, "ask_game_server")
+        self.run_steps()

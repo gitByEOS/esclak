@@ -1,5 +1,5 @@
 from clak.runtime.params import ScriptInputs
-from clak.runtime.session import Session
+from clak.testing import ScriptTester
 from clak.tui.state import TuiState
 from examples.dev_tools.app import app
 from examples.dev_tools.context import context
@@ -9,26 +9,19 @@ from examples.dev_tools.scripts.select_res_server import SelectResServerScript
 
 def test_select_server_prefill():
     context.reset()
-    script = SelectResServerScript()
-    logs = script.output.lines
-    inputs = ScriptInputs.from_pairs({"res_server": "res-staging"}, allow_defaults=False)
-    script.run(Session(script.output, inputs=inputs))
+    run = ScriptTester(SelectResServerScript).run(inputs={"res_server": "res-staging"})
+    assert run.succeeded
     assert context.res_server == "res-staging"
-    assert any("res-staging" in line for line in logs)
+    assert run.output.contains("res-staging")
 
 
 def test_select_server_gate_and_provide():
     context.reset()
-    script = SelectResServerScript()
-    logs = script.output.lines
-    session = Session(script.output, inputs=ScriptInputs(allow_defaults=False))
-    script.run(session)
-    assert session.is_awaiting_input
-    assert session.pending_request
-    assert session.pending_request.field_id == "res_server"
-    session.provide_input("res_server", "res-prod")
-    assert not session.is_awaiting_input
-    assert any("res-prod" in line for line in logs)
+    run = ScriptTester(SelectResServerScript).run()
+    assert run.is_awaiting("res_server")
+    run.provide("res_server", "res-prod")
+    assert run.succeeded
+    assert run.output.contains("res-prod")
 
 
 def test_select_server_updates_status_and_footer():
@@ -36,8 +29,8 @@ def test_select_server_updates_status_and_footer():
     run = app.run_line("/select-res-server", script_inputs=ScriptInputs.from_pairs({"res_server": "res-prod"}, allow_defaults=False))
     assert run.exit_code == 0
     assert app.run_line("/status").text == "当前资源服：res-prod"
-    game = SelectGameServerScript()
-    game.run(Session(game.output, inputs=ScriptInputs.from_pairs({"game_server": "game-prod"}, allow_defaults=False)))
+    game = ScriptTester(SelectGameServerScript).run(inputs={"game_server": "game-prod"})
+    assert game.succeeded
     assert TuiState(app).footer_content().endswith("当前后端服：game-prod")
 
 

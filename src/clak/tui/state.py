@@ -366,12 +366,11 @@ class TuiState:
         self.session = session
         try:
             script.on_enter(session)
-            script.run(session)
+            script.run()
         except (NotImplementedError, ScriptError, ValueError) as error:
             session.cancel()
             self.history_view.push(HistoryEntryKind.ERROR, str(error))
             return
-        session._sync_running()
         if self.script_ask_request():
             self.ask_view, self._ask_field_id = sync_view_for_request(
                 self.script_ask_request(), self._ask_field_id, self.ask_view

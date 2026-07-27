@@ -92,7 +92,7 @@ def _run_script_headless(
     session.on_exit(script.on_exit)
     try:
         script.on_enter(session)
-        script.run(session)
+        script.run()
     except ScriptError as error:
         session.cancel()
         return _failed_script_run(output.render_lines(), str(error), error.exit_code)

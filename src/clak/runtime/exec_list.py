@@ -1,4 +1,4 @@
-"""多步脚本执行列表：步骤返回 0 继续，非 0 挂起。"""
+"""执行队列：任务返回 0 继续，非 0 挂起。"""
 
 from __future__ import annotations
 
@@ -12,38 +12,31 @@ CanDo = bool | Callable[[], bool]
 StepFunc = Callable[..., StepDelay]
 
 
-class StepState(Enum):
+class ExecState(Enum):
     WAITING = auto()
     RUNNING = auto()
 
 
 @dataclass
-class StepEvent:
+class ExecEvent:
     name: str
     can_do: CanDo
     run: StepFunc
     args: tuple[Any, ...] = ()
 
 
-class StepList:
-    """多步脚本：run 返回 0 同步继续，非 0 暂停直至 resume。"""
+class ExecList:
+    """顺序执行队列：任务返回 0 同步继续，非 0 挂起直至 resume。"""
 
     def __init__(self) -> None:
-        self._steps: list[StepEvent] = []
+        self._steps: list[ExecEvent] = []
         self._index = 0
-        self._state = StepState.WAITING
+        self._state = ExecState.WAITING
         self._execute_time: StepDelay = 0
         self._end_callback: Callable[[], None] | None = None
-        self._delay_runner: Callable[[StepDelay, Callable[[], None]], None] | None = None
-        self.debug_mode = False
 
     def set_end_callback(self, callback: Callable[[], None] | None) -> None:
         self._end_callback = callback
-
-    def set_delay_runner(
-        self, runner: Callable[[StepDelay, Callable[[], None]], None] | None
-    ) -> None:
-        self._delay_runner = runner
 
     def add(
         self,
@@ -52,55 +45,50 @@ class StepList:
         name: str = "empty",
         *args: Any,
     ) -> None:
-        if not self._is_valid_step(can_do, run):
-            return
-        self._steps.append(StepEvent(name=name, can_do=can_do, run=run, args=args))
+        if not isinstance(can_do, bool) and not callable(can_do):
+            raise TypeError("can_do 必须是 bool 或 callable")
+        if not callable(run):
+            raise TypeError("run 必须是 callable")
+        self._steps.append(ExecEvent(name=name, can_do=can_do, run=run, args=args))
 
-    def clear(self) -> StepList:
+    def clear(self) -> ExecList:
         self._steps.clear()
         self.stop()
         self.reset()
         return self
 
-    def reset(self) -> StepList:
-        self._state = StepState.WAITING
+    def reset(self) -> ExecList:
+        self._state = ExecState.WAITING
         self._index = 0
         self._execute_time = 0
         return self
 
     def stop(self) -> None:
-        self._state = StepState.WAITING
+        self._state = ExecState.WAITING
 
     @property
     def is_waiting(self) -> bool:
-        return self._state == StepState.WAITING and self._index < len(self._steps)
+        return self._state == ExecState.WAITING and self._index < len(self._steps)
 
     @property
     def is_finished(self) -> bool:
-        return self._index >= len(self._steps) and self._state == StepState.WAITING
+        return self._index >= len(self._steps) and self._state == ExecState.WAITING
 
     def execute(self) -> None:
-        if self._state == StepState.RUNNING:
+        if self._state == ExecState.RUNNING:
             return
-        self._state = StepState.RUNNING
+        self._state = ExecState.RUNNING
         delay = self._run_from(self._index)
-        if delay > 0 and self._index < len(self._steps):
-            self._state = StepState.WAITING
-            self._later(delay, self.resume)
+        if delay != 0:
+            self._state = ExecState.WAITING
             return
-        self._state = StepState.WAITING
+        self._state = ExecState.WAITING
         if self._index >= len(self._steps):
             self._finish(delay)
 
     def resume(self) -> None:
-        if self._state != StepState.WAITING:
+        if self._state != ExecState.WAITING:
             return
-        self.execute()
-
-    def redo(self) -> None:
-        if self._state != StepState.WAITING or self._index == 0:
-            return
-        self._index -= 1
         self.execute()
 
     def _run_from(self, begin: int) -> StepDelay:
@@ -130,14 +118,7 @@ class StepList:
         if delay == 0:
             func()
             return
-        if self._delay_runner:
-            self._delay_runner(delay, func)
-
-    @staticmethod
-    def _is_valid_step(can_do: CanDo, run: StepFunc) -> bool:
-        if not (isinstance(can_do, bool) or callable(can_do)):
-            return False
-        return callable(run)
+        raise RuntimeError("delay step requires delay_runner, but none registered")
 
     @staticmethod
     def _should_run(can_do: CanDo) -> bool:

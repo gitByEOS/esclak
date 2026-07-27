@@ -11,16 +11,18 @@ def test_tui_mounts_and_detaches_script_output_view():
         description = "发布"
 
         def on_enter(self, session: Session) -> None:
+            super().on_enter(session)
             events.append("enter")
 
         def on_exit(self) -> None:
             events.append("exit")
+            super().on_exit()
 
-        def run(self, session: Session) -> None:
+        def run(self) -> None:
             self.output.push("等待发布")
-            session.bind_step_end()
-            session.step_list.add(True, lambda: 1, "wait")
-            session.run()
+            self._session.bind_exec_end()
+            self._session.exec_list.add(True, lambda: 1, "wait")
+            self._session.run()
 
     app = Clak()
     app.register(DeployScript)

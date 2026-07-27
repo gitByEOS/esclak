@@ -1,9 +1,9 @@
-from clak.runtime.step_list import StepList
+from clak.runtime.exec_list import ExecList
 
 
-def test_step_list_runs_sync_steps_in_one_execute():
+def test_exec_list_runs_sync_steps_in_one_execute():
     order: list[str] = []
-    exe = StepList()
+    exe = ExecList()
     exe.add(True, lambda: order.append("a") or 0, "a")
     exe.add(True, lambda: order.append("b") or 0, "b")
     exe.execute()
@@ -11,9 +11,9 @@ def test_step_list_runs_sync_steps_in_one_execute():
     assert exe.is_finished
 
 
-def test_step_list_pauses_until_resume():
+def test_exec_list_pauses_until_resume():
     order: list[str] = []
-    exe = StepList()
+    exe = ExecList()
 
     def pause() -> int:
         order.append("wait")
@@ -29,9 +29,9 @@ def test_step_list_pauses_until_resume():
     assert exe.is_finished
 
 
-def test_step_list_end_callback():
+def test_exec_list_end_callback():
     ended: list[str] = []
-    exe = StepList()
+    exe = ExecList()
     exe.set_end_callback(lambda: ended.append("done"))
     exe.add(True, lambda: 0, "only")
     exe.execute()

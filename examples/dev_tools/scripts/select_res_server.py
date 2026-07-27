@@ -9,13 +9,13 @@ class SelectResServerScript(Script):
     name = "/select-res-server"
     description = "选择资源服务器"
 
-    def run(self, session: Session) -> None:
+    def run(self) -> None:
         def ask_res_server() -> int:
             def save(answer: AskAnswer) -> None:
                 context.res_server = answer.primary
                 self.output.push(f"当前资源服已切换为：{context.res_server}")
 
-            return session.ask_step(
+            return self.ask_tool(
                 AskRequest(
                     field_id="res_server",
                     prompt="选择资源服",
@@ -30,6 +30,5 @@ class SelectResServerScript(Script):
                 save,
             )
 
-        session.bind_step_end()
-        session.step_list.add(True, ask_res_server, "ask_res_server")
-        session.run()
+        self.add_step(True, ask_res_server, "ask_res_server")
+        self.run_steps()
