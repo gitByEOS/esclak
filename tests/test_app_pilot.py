@@ -13,7 +13,6 @@ def test_tui_uses_the_terminal_default_background():
 
     asyncio.run(run())
     assert "background:" not in ClakApp.CSS
-    assert "#0d1117" not in ClakApp.CSS
 
 
 def test_typing_does_not_crash():

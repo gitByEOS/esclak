@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from rich.cells import cell_len
 from rich.console import RenderResult
 from rich.segment import Segment
 from rich.style import Style
-from wcwidth import wcswidth, wcwidth
 
 from clak.tui import theme
+from clak.tui.views.text import fit_line, truncate_cells, wrap_cells
 
 if TYPE_CHECKING:
     from clak.tui.screen import CursorTarget
@@ -16,12 +18,16 @@ INPUT_PREFIX = "❯ "
 INPUT_MAX_VISIBLE_LINES = 16
 
 
+def _prefix_width(term_width: int) -> int:
+    return min(prefix_display_width(), max(0, term_width - 1))
+
+
 def inner_width(term_width: int) -> int:
-    return max(1, term_width - max(0, wcswidth(INPUT_PREFIX)))
+    return max(1, term_width - _prefix_width(term_width))
 
 
 def prefix_display_width() -> int:
-    return max(0, wcswidth(INPUT_PREFIX))
+    return cell_len(INPUT_PREFIX)
 
 
 class InputView:
@@ -29,6 +35,7 @@ class InputView:
         self.input = ""
         self.cursor = 0
         self.scroll = 0
+        self._term_width = 80
 
     def is_empty(self) -> bool:
         return not self.input
@@ -46,43 +53,47 @@ class InputView:
         self.ensure_cursor_visible(term_width)
 
     def insert_at_cursor(self, text: str, term_width: int) -> None:
-        byte_index = _char_boundary_at(self.input, self.cursor)
-        self.input = self.input[:byte_index] + text + self.input[byte_index:]
+        self.cursor = max(0, min(len(self.input), self.cursor))
+        self.input = self.input[:self.cursor] + text + self.input[self.cursor:]
         self.cursor += len(text)
         self.ensure_cursor_visible(term_width)
 
     def delete_before_cursor(self) -> None:
         if self.cursor == 0:
             return
-        start = _char_boundary_at(self.input, self.cursor - 1)
-        end = _char_boundary_at(self.input, self.cursor)
-        self.input = self.input[:start] + self.input[end:]
+        self.input = self.input[:self.cursor - 1] + self.input[self.cursor:]
         self.cursor -= 1
+        self.ensure_cursor_visible(self._term_width)
 
     def delete_after_cursor(self) -> None:
         if self.cursor >= len(self.input):
             return
-        start = _char_boundary_at(self.input, self.cursor)
-        end = _char_boundary_at(self.input, self.cursor + 1)
-        self.input = self.input[:start] + self.input[end:]
+        self.input = self.input[:self.cursor] + self.input[self.cursor + 1:]
+        self.ensure_cursor_visible(self._term_width)
 
     def move_cursor(self, delta: int, term_width: int) -> None:
-        count = len(self.input)
-        self.cursor = max(0, min(count, self.cursor + delta))
+        self.cursor = max(0, min(len(self.input), self.cursor + delta))
         self.ensure_cursor_visible(term_width)
 
     def move_cursor_home(self) -> None:
         self.cursor = 0
+        self.ensure_cursor_visible(self._term_width)
 
     def move_cursor_end(self) -> None:
         self.cursor = len(self.input)
+        self.ensure_cursor_visible(self._term_width)
 
-    def ensure_cursor_visible(self, term_width: int) -> None:
+    def ensure_cursor_visible(self, term_width: int, max_rows: int | None = None) -> None:
+        self._term_width = term_width
         width = inner_width(term_width)
         cursor_row = _cursor_wrapped_row(self.input, self.cursor, width)
-        visible = _visible_lines(self.input, width)
+        total = len(_wrapped_input_lines(self.input, width))
+        visible = max(
+            1, min(total, INPUT_MAX_VISIBLE_LINES if max_rows is None else max_rows)
+        )
+        self.scroll = max(0, min(self.scroll, total - visible))
         if cursor_row >= self.scroll + visible:
-            self.scroll = max(0, cursor_row - max(0, visible - 1))
+            self.scroll = cursor_row - visible + 1
         elif cursor_row < self.scroll:
             self.scroll = cursor_row
 
@@ -107,98 +118,68 @@ def render_input(
     start_y: int,
     cursor_target: CursorTarget,
 ) -> RenderResult:
-    rule = "─" * width
+    if height <= 0:
+        return
+    rule = "─" * max(0, width)
     yield Segment(rule, Style(color=theme.INPUT_RULE))
     yield Segment.line()
-
-    content_h = max(1, height - 2)
-    prefix = INPUT_PREFIX
-
-    if input_view.is_empty():
-        yield Segment(prefix.ljust(width)[:width], Style(color="bright_black"))
+    content_h = max(0, height - 2)
+    input_view.ensure_cursor_visible(width, content_h)
+    wrapped = input_view.wrapped_lines(width)
+    prefix_width = _prefix_width(width)
+    for row in range(content_h):
+        index = input_view.scroll + row
+        line = wrapped[index] if index < len(wrapped) else ""
+        prefix = (
+            truncate_cells(INPUT_PREFIX, prefix_width) if row == 0 else " " * prefix_width
+        )
+        style = Style(color="bright_black") if input_view.is_empty() else Style()
+        yield from fit_line([Segment(prefix + line, style)], width)
         yield Segment.line()
-        for _ in range(content_h - 1):
-            yield Segment(" " * width, Style())
-            yield Segment.line()
-        cursor_target.cursor_screen = (prefix_display_width(), start_y + 1)
-    else:
-        wrapped = input_view.wrapped_lines(width)
-        scroll = input_view.scroll
-        visible = wrapped[scroll : scroll + content_h]
-        while len(visible) < content_h:
-            visible.append("")
-        for row_index, line in enumerate(visible):
-            display_prefix = prefix if row_index == 0 else "  "
-            text = display_prefix + line
-            yield Segment(text[:width].ljust(width), Style())
-            yield Segment.line()
-        pos = input_view.cursor_position(width, content_h)
-        if pos:
-            col, row = pos
-            pcols = prefix_display_width() if row == 0 else 2
-            cursor_target.cursor_screen = (pcols + col, start_y + 1 + row)
+    position = input_view.cursor_position(width, content_h)
+    if position is not None and width > 0:
+        column, row = position
+        cursor_target.cursor_screen = (
+            min(width - 1, prefix_width + column), start_y + 1 + row
+        )
+    if height > 1:
+        yield Segment(rule, Style(color=theme.INPUT_RULE))
+        yield Segment.line()
 
-    yield Segment(rule, Style(color=theme.INPUT_RULE))
-    yield Segment.line()
+
+@dataclass(frozen=True)
+class _InputLine:
+    text: str
+    start: int
+
+
+def _wrapped_input_lines(input_text: str, inner_w: int) -> list[_InputLine]:
+    lines: list[_InputLine] = []
+    offset = 0
+    for raw in input_text.split("\n"):
+        start = offset
+        for part in wrap_cells(raw, inner_w):
+            lines.append(_InputLine(part, start))
+            start += len(part)
+        # 仅原文的真实换行占用一个字符，软换行不改变偏移
+        offset += len(raw) + 1
+    return lines
 
 
 def wrap_input_lines(input_text: str, inner_w: int) -> list[str]:
-    max_w = max(1, inner_w)
-    lines: list[str] = []
-    for raw in input_text.split("\n"):
-        if not raw:
-            lines.append("")
-            continue
-        current = ""
-        column = 0
-        for ch in raw:
-            width = max(1, wcwidth(ch) or 0)
-            if column + width > max_w and current:
-                lines.append(current)
-                current = ""
-                column = 0
-            current += ch
-            column += width
-        lines.append(current)
-    if not lines:
-        lines.append("")
-    return lines
+    return [line.text for line in _wrapped_input_lines(input_text, inner_w)]
 
 
 def _visible_lines(input_text: str, inner_w: int) -> int:
-    if not input_text:
-        return 1
-    total = sum(_wrap_line_count(line, inner_w) for line in input_text.split("\n"))
-    return max(1, min(INPUT_MAX_VISIBLE_LINES, total))
-
-
-def _wrap_line_count(line: str, max_width: int) -> int:
-    max_w = max(1, max_width)
-    if not line:
-        return 1
-    lines = 1
-    column = 0
-    for ch in line:
-        width = max(1, wcwidth(ch) or 0)
-        if column + width > max_w and column > 0:
-            lines += 1
-            column = width
-        else:
-            column += width
-    return lines
+    return min(INPUT_MAX_VISIBLE_LINES, len(_wrapped_input_lines(input_text, inner_w)))
 
 
 def _cursor_wrapped_row(input_text: str, char_cursor: int, inner_w: int) -> int:
-    wrapped = wrap_input_lines(input_text, inner_w)
-    chars_seen = 0
-    for row, line in enumerate(wrapped):
-        line_char_count = len(line)
-        if char_cursor <= chars_seen + line_char_count:
-            return row
-        chars_seen += line_char_count
-        if row + 1 < len(wrapped):
-            chars_seen += 1
-    return max(0, len(wrapped) - 1)
+    cursor = max(0, min(len(input_text), char_cursor))
+    wrapped = _wrapped_input_lines(input_text, inner_w)
+    return next(
+        row for row in range(len(wrapped) - 1, -1, -1) if wrapped[row].start <= cursor
+    )
 
 
 def _cursor_position(
@@ -208,26 +189,12 @@ def _cursor_position(
     max_rows: int,
     scroll_row: int,
 ) -> tuple[int, int] | None:
-    wrapped = wrap_input_lines(input_text, inner_w)
-    chars_seen = 0
-    for row, line in enumerate(wrapped):
-        line_char_count = len(line)
-        if char_cursor <= chars_seen + line_char_count:
-            offset = char_cursor - chars_seen
-            col = sum(max(1, wcwidth(ch) or 0) for ch in line[:offset])
-            visible_row = row - scroll_row
-            if visible_row >= max_rows:
-                return None
-            return col, visible_row
-        chars_seen += line_char_count
-        if row + 1 < len(wrapped):
-            chars_seen += 1
-    return None
-
-
-def _char_boundary_at(text: str, char_index: int) -> int:
-    if char_index <= 0:
-        return 0
-    if char_index >= len(text):
-        return len(text)
-    return len(text[:char_index])
+    wrapped = _wrapped_input_lines(input_text, inner_w)
+    row = _cursor_wrapped_row(input_text, char_cursor, inner_w)
+    visible_row = row - scroll_row
+    if not 0 <= visible_row < max_rows:
+        return None
+    line = wrapped[row]
+    offset = max(0, min(len(line.text), char_cursor - line.start))
+    column = min(max(0, inner_w - 1), cell_len(line.text[:offset]))
+    return column, visible_row

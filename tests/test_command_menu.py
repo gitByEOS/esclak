@@ -21,13 +21,15 @@ def test_filter_prefers_contiguous_alias_match():
     assert match[0].matched_indices == (1, 2)
 
 
-def test_command_menu_renders_fuzzy_matches_in_yellow():
+def test_command_menu_renders_fuzzy_matches_in_semantic_highlight():
     match = Clak().slash_engine.filter("qi")
     segments = list(
         render_command(CommandViewState(open=True, matches=match), width=80, height=4)
     )
-    yellow = [segment.text for segment in segments if isinstance(segment, Segment) and str(segment.style) == "bold yellow"]
-    assert yellow == ["q", "i"]
+    name_segments = [segment for segment in segments if segment.text in ("/", "q", "u", "i", "t")]
+    ordinary = next(segment.style for segment in name_segments if segment.text == "/")
+    highlighted = [segment.text for segment in name_segments if segment.style != ordinary]
+    assert highlighted == ["q", "i"]
 
 
 def test_typing_letters_opens_menu_and_enter_runs_selection():

@@ -1,14 +1,14 @@
 from clak.tui.event import TuiEvent, TuiKey
-from clak.tui.state import TuiState
 from clak.tui.views import ask as ask_view
 from examples.dev_tools.app import app
 from examples.dev_tools.context import context
 
 
-def test_filter_typing_narrows_choices():
+def test_filter_typing_narrows_choices(tui_driver):
     context.reset()
-    state = TuiState(app)
-    state._start_script("select-res-server")
+    driver = tui_driver(app)
+    state = driver.state
+    driver.start("select-res-server")
     request = state.script_ask_request()
     assert ask_view.is_filter(request)
     # 输入 "prod" 应只剩生产资源服
@@ -20,21 +20,23 @@ def test_filter_typing_narrows_choices():
     assert state.ask_view.selected == 0
 
 
-def test_filter_enter_submits_selected():
+def test_filter_enter_submits_selected(tui_driver):
     context.reset()
-    state = TuiState(app)
-    state._start_script("select-res-server")
+    driver = tui_driver(app)
+    state = driver.state
+    driver.start("select-res-server")
     for ch in "staging":
         state.handle_event(TuiEvent(key=TuiKey("char", char=ch)))
     state.handle_event(TuiEvent(key=TuiKey("enter")))
-    state.after_present()
+    driver.wait()
     assert context.res_server == "res-staging"
 
 
-def test_filter_backspace_restores():
+def test_filter_backspace_restores(tui_driver):
     context.reset()
-    state = TuiState(app)
-    state._start_script("select-res-server")
+    driver = tui_driver(app)
+    state = driver.state
+    driver.start("select-res-server")
     request = state.script_ask_request()
     for ch in "prod":
         state.handle_event(TuiEvent(key=TuiKey("char", char=ch)))
@@ -45,9 +47,10 @@ def test_filter_backspace_restores():
     assert state.ask_view.selected == 0
 
 
-def test_filter_escape_cancels():
+def test_filter_escape_cancels(tui_driver):
     context.reset()
-    state = TuiState(app)
-    state._start_script("select-res-server")
+    driver = tui_driver(app)
+    state = driver.state
+    driver.start("select-res-server")
     state.handle_event(TuiEvent(key=TuiKey("escape")))
     assert not state.is_ask_choosing()

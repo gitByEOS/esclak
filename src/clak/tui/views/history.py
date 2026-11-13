@@ -7,6 +7,7 @@ from rich.segment import Segment
 from rich.style import Style
 
 from clak.runtime.output import OutputView
+from clak.tui.views.text import fit_line, wrap_cells
 ROLE_STYLES: dict[str, tuple[str, str]] = {
     "user": ("You", "cyan"),
     "assistant": ("Assistant", "green"),
@@ -49,6 +50,9 @@ class HistoryView:
         self.entries: list[HistoryEntry] = []
         self.output_views: list[OutputView] = []
         self.scroll: int = 0
+        self._viewport_width: int | None = None
+        self._viewport_height = 1
+        self._line_count = 0
 
     def push(self, kind: HistoryEntryKind, text: str) -> None:
         self.entries.append(HistoryEntry(kind, text))
@@ -56,12 +60,26 @@ class HistoryView:
     def clear(self) -> None:
         self.entries.clear()
         self.scroll = 0
+        self._line_count = 0
 
-    def scroll_up(self) -> None:
-        self.scroll = max(0, self.scroll - 1)
+    def scroll_up(self, steps: int | None = None) -> None:
+        distance = self._viewport_height if steps is None else max(0, steps)
+        self.scroll = min(
+            max(0, self._line_count - self._viewport_height), self.scroll + distance
+        )
 
-    def scroll_down(self) -> None:
-        self.scroll += 1
+    def scroll_down(self, steps: int | None = None) -> None:
+        distance = self._viewport_height if steps is None else max(0, steps)
+        self.scroll = max(0, self.scroll - distance)
+
+    def update_viewport(self, width: int, height: int, line_count: int) -> None:
+        # 离底查阅时，仅同宽新增的显示行补偿底部偏移
+        if self.scroll > 0 and width == self._viewport_width:
+            self.scroll += max(0, line_count - self._line_count)
+        self._viewport_width = width
+        self._viewport_height = max(1, height)
+        self._line_count = line_count
+        self.scroll = max(0, min(self.scroll, line_count - self._viewport_height))
 
     def attach(self, output_view: OutputView) -> None:
         self.output_views.append(output_view)
@@ -124,10 +142,11 @@ def render_history(
         lines.extend(entry_lines(entry))
     for output_view in history.output_views:
         lines.extend(output_view.render_lines())
-    scroll = history.scroll
-    visible = lines[scroll : scroll + height] if lines else [""]
-    while len(visible) < height:
-        visible.append("")
-    for line in visible[:height]:
-        yield Segment(line.ljust(width)[:width], Style())
+    wrapped = [part for line in lines for part in wrap_cells(line, width)]
+    history.update_viewport(width, height, len(wrapped))
+    end = max(0, len(wrapped) - history.scroll)
+    visible = wrapped[max(0, end - height) : end]
+    for row in range(max(0, height)):
+        text = visible[row] if row < len(visible) else ""
+        yield from fit_line([Segment(text, Style())], width)
         yield Segment.line()
