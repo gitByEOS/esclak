@@ -28,7 +28,7 @@ path = "src/clak/__init__.py"
 packages = ["src/clak"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/clak", "examples", "docs/images/logo.svg", "README.md", "LICENSE"]
+include = ["src/clak", "examples", "docs/images/logo.svg", "docs/tech.md", "README.md", "CHANGELOG.md", "AGENTS.md", "LICENSE"]
 
 [project.optional-dependencies]
 dev = [

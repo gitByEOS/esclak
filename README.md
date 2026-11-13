@@ -8,10 +8,21 @@
 
 **C**ommand · **L**ines · **A**ggregator · **K**it
 
-- `clak` 是一个仿 `claude cli tui` 的聚合器，可以给散落脚本一个统一入口
-- 支持：tui 交互模式 和 exec 无头模式
-- 支持：模糊搜索、自定义脚本注入
-- 支持：步骤编排、交互提问、动态状态和脚本级输出视图
+给散落的 Python 脚本一个统一入口，支持交互 TUI 和无头执行。
+
+- 输入字母即可模糊搜索命令
+- 注册自己的业务脚本，编排步骤与交互提问
+- 查看日志、动态状态和固定步骤进度
+- 同一份脚本可交互运行，也可传参批量执行
+
+| 文档 | 适合什么时候阅读 |
+|---|---|
+| 本页 | 安装、接入与日常操作 |
+| [完整示例](examples/dev_tools/README.md) | 运行发布工具、编写问答与验证停止行为 |
+| [设计原则](docs/tech.md) | 维护框架时核对职责、状态、线程与扩展契约 |
+| [Agent 使用指南](skills/clak/SKILL.md) | 让 Agent 使用 esclak 编写自己的业务工具 |
+| [项目维护指南](AGENTS.md) | 修改本仓库、验证、记录任务、提交与发版 |
+| [版本记录](CHANGELOG.md) | 查看已整理的版本变化 |
 
 ## 安装
 
@@ -19,7 +30,7 @@
 pip install esclak
 ```
 
-需要 Python 3.10 或更高版本。发布变更见 [CHANGELOG.md](CHANGELOG.md)。
+需要 Python 3.10 或更高版本。
 
 ## 最小应用
 
@@ -37,7 +48,7 @@ class DeployScript(Script):
             self.output.push("发布完成")
             return 0
 
-        self.add_step(True, publish, "publish")
+        self.add_step(True, publish, "发布服务")
         self.run_steps()
 
 
@@ -48,7 +59,7 @@ if __name__ == "__main__":
     app.run_cli(prog="my-tool")
 ```
 
-保存为 `my_tool.py` 后，可以使用同一个应用入口运行 TUI 或无头任务：
+保存为 `my_tool.py` 后运行：
 
 ```bash
 python my_tool.py                 # 默认打开 TUI
@@ -56,115 +67,96 @@ python my_tool.py tui             # 显式打开 TUI
 python my_tool.py exec /deploy    # 无头执行已注册脚本
 ```
 
-安装后得到的全局 `clak` 命令只包含 `/version`、`/status` 等内置命令。业务脚本注册在自己的 `Clak` 实例中，因此应从项目入口执行。
+业务脚本应从自己的项目入口运行；安装后的全局 `clak` 只包含 `/version`、`/status` 等内置命令。
 
-## TUI 命令菜单
+## 交互操作
 
-主输入区直接键入字母即可搜索命令，无需先输入 `/`。搜索使用大小写无关的子序列匹配，例如 `qi` 会匹配 `/quit`，命中的 `q` 和 `i` 显示为黄色。`↑`/`↓` 切换候选，`Enter` 执行选中命令，`Tab` 补全为完整 slash 命令，`Esc` 清空本次搜索；仍可直接输入完整 `/command`。
+| 操作 | 用法 |
+|---|---|
+| 搜索命令 | 直接输入字母，例如 `qi` 可匹配 `/quit`，命中字符黄绿色 |
+| 选择与执行 | 命令候选打开时 `↑`/`↓` 选择，`Enter` 执行，`Tab` 补全 |
+| 执行历史 | 空输入按 `↑` 回填上一条命令，`↑`/`↓` 浏览，`Enter` 再次执行 |
+| 取消输入或历史浏览 | `Esc` 清空，不恢复草稿 |
+| 粘贴 | 支持主输入、提问过滤框与自定义输入，不自动执行 |
+| 查阅日志 | `PageUp` 上翻，`PageDown` 回底后恢复跟尾 |
+| 清空日志 | `/clear`，保留当前进程的执行历史 |
+| 查看版本 | `/version` |
 
-TUI 使用终端原生 ANSI 前景和背景，不强制深色主题；在 VS Code 集成终端中会继承当前终端配色。
+普通单选、多选候选不接收粘贴；提问文本输入会将换行合并为单行。终端配色继承宿主环境，不强制黑底；中文按显示宽度排版。
 
-## 带输入的无头执行
+### 步骤进度
 
-```bash
-python my_tool.py exec /deploy --set environment=staging
-python my_tool.py exec /deploy --use-defaults
+运行时，输入区上方显示固定进度：
+
+```text
+✻ 发布检查…（3s · step 3/8 ）
+  └ ✔ 选择检查结果
+    ✔ 检查发布配置
+    ◼ 检查资源清单
+    ◻ 检查资源版本
+    ◻ 检查服务连接
+    …
 ```
 
-- `--set field=value` 可以重复；只提供部分字段时，缺少的字段会报错并返回退出码 2。
-- `--use-defaults` 允许未提供的字段使用 `AskRequest.default`。
-- choice 字段在 TUI 和无头模式使用相同校验，候选之外的值会被拒绝。
+完成项名称置灰并带删除线，仅对勾为绿色；未完成名称白色，当前名称加粗，当前方块固定黄绿色。标题与旋转标记按暖色九帧往返，每帧停留 0.22 秒，末帧完整停留，1.98 秒一轮。进度显示当前附近五项，省略号与步骤标记对齐；隐藏完成项以 `… +N completed` 汇总。完成、失败或停止收尾后进度区自动清空，业务日志与错误保留；进度不刷入日志。
 
-也可以直接调用 Python API：
+### 停止与退出
+
+| 操作 | 行为 |
+|---|---|
+| 运行中 `Ctrl+C` | 请求停止，当前调用结束后跳过后续步骤并清理 |
+| 等待答案时 `Ctrl+C` | 停止当前脚本 |
+| `Ctrl+Q` 或 `/quit` | 停止并清理后退出 |
+| 当前脚本未结束时再启动 | 提示等待，避免重复运行 |
+
+耗时步骤不会阻塞界面，但停止不等于强杀：`subprocess.run()`、网络请求等阻塞调用不会被自动终止，应由脚本设置超时或管理终止。临时资源应在 `on_exit()` 清理，不要提前删除仍在使用的文件。
+
+## 无头执行与输入参数
+
+```bash
+python my_tool.py exec /deploy
+```
+
+脚本有提问字段时，用 `--set 字段名=值` 提供答案，或用 `--use-defaults` 接受默认值；字段名由脚本定义。以完整示例为例：
+
+```bash
+python3 -m examples.dev_tools exec /pack-upload \
+  --set version=1.2.3 \
+  --set targets=base,ios
+python3 -m examples.dev_tools exec /pack-upload --use-defaults
+```
+
+- `--set` 可重复；只提供部分字段时，缺少的字段会报错，退出码为 `2`
+- `--use-defaults` 允许未提供的字段使用默认值
+- 候选值与业务格式仍会校验，不会绕过交互模式的规则
+
+也可直接调用 Python API：
 
 ```python
-from clak import ScriptInputs
-
-run = app.run_line(
-    "/deploy",
-    script_inputs=ScriptInputs.from_pairs(
-        {"environment": "staging"},
-        allow_defaults=False,
-    ),
-)
+run = app.run_line("/deploy")
 print(run.text)
 raise SystemExit(run.exit_code)
 ```
 
-## 执行队列
+## 编写业务脚本
 
-`session.exec_list.add(can_do, task, name)` 中：
+| 需求 | 推荐接口 |
+|---|---|
+| 添加步骤 | `self.add_step(条件, 函数, "面向用户的步骤名称")` |
+| 启动步骤 | `self.run_steps()` |
+| 提问 | 在步骤中返回 `self.ask_tool(AskRequest(...), 答案回调)` |
+| 输出日志 | `self.output.push("发布完成")` |
+| 业务失败 | 抛出 `ScriptError("失败原因", exit_code=1)` |
+| 参数错误 | 抛出 `ValueError("输入格式不正确")` |
+| 资源清理 | 重写 `on_exit()`，并调用 `super().on_exit()` |
 
-- `can_do` 是布尔值或无参判断函数；为假时跳过该任务。
-- 普通同步任务返回 `0`，随后继续执行下一项。
-- 非零返回值表示队列挂起，不代表进程失败；`ask_step()` 会负责挂起和恢复。
-- `bind_exec_end()` 绑定队列完成通知，脚本入口必须在 `run()` 前调用。
-- 每次脚本执行都会获得新的 `Session` 和 `ExecList`，通常不需要先调用 `clear()`。
-
-可预期的业务失败使用 `ScriptError`：
-
-```python
-from clak import ScriptError
-
-if deploy_failed:
-    raise ScriptError("发布失败：健康检查未通过", exit_code=1)
-```
-
-TUI 会显示该错误；无头模式会写入 stderr 并返回指定退出码。参数格式错误使用 `ValueError`，返回退出码 2。
-
-## 生命周期与输出
-
-每次运行都会创建新的 Script 实例和 `self.output`。默认 `self.output.push()` 会为每一行增加 `[脚本名] ` 前缀，例如 `[pack-upload] 上传完成`，便于区分不同脚本的 history 输出。TUI 在启动时调用 `on_enter(session)`，完成、失败或中断时调用 `on_exit()`。脚本结束后，输出会保留在 history 中。
-
-```python
-class PublishScript(Script):
-    name = "/publish"
-    description = "发布"
-
-    def on_enter(self, session: Session) -> None:
-        super().on_enter(session)
-        self.output.push("已创建临时目录")
-
-    def on_exit(self) -> None:
-        self.output.push("已清理临时目录")
-        super().on_exit()
-```
-
-## 稳定公共 API
-
-常用业务类型均可从 `clak` 顶层导入：
-
-```python
-from clak import (
-    AskAnswer,
-    AskChoice,
-    AskMode,
-    AskRequest,
-    Clak,
-    FooterViewData,
-    HeadlessRun,
-    OutputView,
-    Script,
-    ScriptError,
-    ScriptInputs,
-    Session,
-)
-```
-
-`clak.runtime.*` 是实现模块；业务代码优先使用上述顶层导入。
+普通步骤返回 `0` 继续；非零表示等待恢复，不是失败退出码。使用 `run_steps()` 绑定完成清理。提问、生命周期和自定义输出的完整写法见 [示例](examples/dev_tools/README.md)；底层接口与扩展约定见 [技术设计](docs/tech.md)。
 
 ## 完整项目示例
 
-[dev_tools 完整示例](https://github.com/gitByEOS/esclak/tree/master/examples/dev_tools) 展示：
+`examples/dev_tools` 展示服务器选择、单选/多选/过滤与自定义输入、发布检查、失败退出码、临时资源清理和脚本测试。
 
-- 项目级 `tui`/`exec` 入口；
-- 单选、多选、过滤与自定义输入；
-- 跨脚本的进程内状态和动态 footer；
-- choice 与版本号校验；
-- 子进程成功、失败退出码、条件步骤和临时目录清理；
-- TUI 与无头测试。
-
-克隆仓库后，先以可编辑模式安装当前源码和开发依赖：
+在源码仓库根目录执行：
 
 ```bash
 python3 -m pip install -e ".[dev]"
@@ -173,7 +165,9 @@ python3 -m examples.dev_tools exec /pack-upload --use-defaults
 python3 -m examples.dev_tools exec /verify-release --set outcome=failure
 ```
 
-详细说明见 [examples/dev_tools/README.md](https://github.com/gitByEOS/esclak/blob/master/examples/dev_tools/README.md)。源码发行包也包含 `examples/`。
+进入 TUI 后依次运行 `/select-res-server`、`/select-game-server` 和 `/verify-release`，即可观察进度与停止行为；检查仅为本地模拟，不访问真实服务器。
+
+详细操作见 [示例说明](examples/dev_tools/README.md)。源码发行包包含示例与 [技术设计](docs/tech.md)。
 
 ## 开发验证
 
@@ -181,6 +175,8 @@ python3 -m examples.dev_tools exec /verify-release --set outcome=failure
 python3 -m pip install -e ".[dev]"
 python3 -m pytest
 ```
+
+测试分层与框架不变量见 [技术设计](docs/tech.md#9-验证策略)。
 
 ## 许可
 
