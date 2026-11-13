@@ -167,7 +167,7 @@ python3 -m examples.dev_tools exec /verify-release --set outcome=failure
 
 进入 TUI 后依次运行 `/select-res-server`、`/select-game-server` 和 `/verify-release`，即可观察进度与停止行为；检查仅为本地模拟，不访问真实服务器。
 
-详细操作见 [示例说明](examples/dev_tools/README.md)。源码发行包包含示例与 [技术设计](docs/tech.md)。
+详细操作见 [示例说明](examples/dev_tools/README.md)。源码发行包包含示例、[技术设计](docs/tech.md)、任务记录与完整 [Agent 使用指南](skills/clak/SKILL.md)。
 
 ## 开发验证
 
