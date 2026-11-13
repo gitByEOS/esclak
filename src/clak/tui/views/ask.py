@@ -3,14 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from rich.cells import cell_len
 from rich.console import RenderResult
 from rich.segment import Segment
 from rich.style import Style
-from wcwidth import wcswidth
 
 from clak.runtime.ask import AskChoice, AskMode, AskRequest
 from clak.tui import theme
 from clak.tui.views.input import InputView
+from clak.tui.views.text import fit_line, truncate_cells
 
 if TYPE_CHECKING:
     from clak.tui.screen import CursorTarget
@@ -125,17 +126,7 @@ def multi_check_prefix(index: int, toggled: frozenset[int], selected: int) -> st
 
 
 def truncate_to_width(text: str, max_cols: int) -> str:
-    if max_cols <= 0:
-        return ""
-    cols = 0
-    out: list[str] = []
-    for ch in text:
-        w = max(1, wcswidth(ch) or 0)
-        if cols + w > max_cols:
-            break
-        out.append(ch)
-        cols += w
-    return "".join(out)
+    return truncate_cells(text, max_cols)
 
 
 def inline_draft_text(input_view: InputView) -> str:
@@ -184,27 +175,26 @@ def render_ask(
     start_y: int,
     cursor_target: CursorTarget,
 ) -> RenderResult:
+    if height <= 0:
+        return
     title = "─ Ask " + "─" * max(0, width - 6)
-    yield Segment(title[:width], Style(color=theme.ASK_RULE))
+    yield from fit_line([Segment(title, Style(color=theme.ASK_RULE))], width)
     yield Segment.line()
 
-    content_h = max(1, height - 2)
+    content_h = max(0, height - 2)
     if is_filter(request):
-        yield from _render_filter(request, ask_view, width, content_h, start_y, cursor_target)
+        content = _render_filter(request, ask_view, width, content_h, start_y, cursor_target)
     else:
-        yield from _render_single_multi(
+        content = _render_single_multi(
             request, ask_view, input_view, width, content_h, start_y, cursor_target
         )
-
-    while True:
-        yield Segment(" " * width, Style())
+    rows = list(Segment.split_lines(content))
+    for row in range(content_h):
+        yield from fit_line(rows[row] if row < len(rows) else [], width)
         yield Segment.line()
-        content_h -= 1
-        if content_h <= 0:
-            break
-
-    yield Segment("─" * width, Style(color=theme.ASK_RULE))
-    yield Segment.line()
+    if height > 1:
+        yield Segment("─" * max(0, width), Style(color=theme.ASK_RULE))
+        yield Segment.line()
 
 
 def _render_filter(
@@ -217,17 +207,17 @@ def _render_filter(
 ) -> RenderResult:
     row = 0
     if row < content_h:
-        yield Segment(request.prompt[:width].ljust(width), Style(bold=True))
+        yield Segment(request.prompt, Style(bold=True))
         yield Segment.line()
         row += 1
 
     query = ask_view.query
     query_line = f"> {query}"
     if row < content_h:
-        cols = wcswidth(query_line)
-        yield Segment(query_line[:width].ljust(width), Style(color=theme.ASK_ACCENT))
+        cols = cell_len(query_line)
+        yield Segment(query_line, Style(color=theme.ASK_ACCENT))
         yield Segment.line()
-        cursor_target.cursor_screen = (min(cols, width), start_y + 1 + row)
+        cursor_target.cursor_screen = (min(cols, max(0, width - 1)), start_y + 1 + row)
         row += 1
 
     filtered = filtered_choices(request, query)
@@ -254,7 +244,7 @@ def _render_filter(
             if is_focused
             else Style(color=theme.MENU_NORMAL)
         )
-        yield Segment(text[:width].ljust(width), style)
+        yield Segment(text, style)
         yield Segment.line()
         row += 1
 
@@ -271,10 +261,10 @@ def _render_single_multi(
     row = 0
     selected = ask_view.selected
     type_row_index = custom_choice_index(request)
-    multi = is_multi(request)
+    is_multi_mode = is_multi(request)
 
     if row < content_h:
-        yield Segment(request.prompt[:width].ljust(width), Style(bold=True))
+        yield Segment(request.prompt, Style(bold=True))
         yield Segment.line()
         row += 1
 
@@ -282,14 +272,14 @@ def _render_single_multi(
         if row >= content_h:
             break
         is_custom_row = (
-            not multi and type_row_index is not None and index == type_row_index
+            not is_multi_mode and type_row_index is not None and index == type_row_index
         )
         is_focused = index == selected
 
         if is_custom_row:
             head = type_row_head(choice, index, selected, type_row_index)
-            head_cols = wcswidth(head)
-            inner_w = max(1, width - head_cols)
+            head_cols = cell_len(head)
+            inner_w = max(0, width - head_cols)
             typed = truncate_to_width(inline_draft_text(input_view), inner_w)
             line = head + typed
             style = (
@@ -297,17 +287,16 @@ def _render_single_multi(
                 if is_focused
                 else Style(color="bright_black")
             )
-            yield Segment(line[:width].ljust(width), style)
+            yield Segment(line, style)
             yield Segment.line()
             if is_focused:
-                draft = inline_draft_text(input_view)
-                cursor = min(input_view.cursor, len(draft))
-                col = wcswidth(draft[:cursor])
-                cursor_target.cursor_screen = (head_cols + col, start_y + 1 + row)
+                draft_before_cursor = input_view.input[:input_view.cursor].replace("\n", "")
+                col = min(max(0, width - 1), head_cols + cell_len(draft_before_cursor))
+                cursor_target.cursor_screen = (col, start_y + 1 + row)
             row += 1
             continue
 
-        if multi:
+        if is_multi_mode:
             prefix = multi_check_prefix(index, ask_view.toggled, selected)
             label = choice.label.strip() or (choice.value or "")
         else:
@@ -319,6 +308,6 @@ def _render_single_multi(
             if is_focused
             else Style(color=theme.MENU_NORMAL)
         )
-        yield Segment(text[:width].ljust(width), style)
+        yield Segment(text, style)
         yield Segment.line()
         row += 1

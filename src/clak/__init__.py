@@ -1,6 +1,6 @@
 """clak：固定流程脚本壳。"""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from clak.application import Clak, FooterViewData
 from clak.commands.types import Script

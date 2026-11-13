@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from textual import events
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.geometry import Offset
+from textual.message import Message
 from textual.widgets import Static
 
 from clak.application import Clak
+from clak.tui import theme
 from clak.tui.event import TuiEvent, TuiKey, TuiOutcome
 from clak.tui.state import TuiState
 from clak.tui.screen import ClakRenderable
+from clak.tui.runner import RunUpdate, ScriptRunner
 
 _MODIFIER_ALIASES = frozenset({"meta", "super", "cmd", "hyper", "alt"})
 _SPECIAL_KEYS = frozenset(
@@ -63,6 +67,21 @@ def key_from_textual(event: events.Key) -> TuiKey:
     return TuiKey("unknown", ctrl=ctrl, shift=shift, meta=meta)
 
 
+class ScriptUpdated(Message):
+    def __init__(self, runner: ScriptRunner, update: RunUpdate) -> None:
+        super().__init__()
+        self.runner = runner
+        self.update = update
+
+    def can_replace(self, message: Message) -> bool:
+        return (
+            isinstance(message, ScriptUpdated)
+            and message.runner is self.runner
+            and message.update.state == self.update.state
+            and (message.update.session is None) == (self.update.session is None)
+        )
+
+
 class ClakView(Static):
     can_focus = True
 
@@ -70,6 +89,7 @@ class ClakView(Static):
         super().__init__()
         self.state = state
         self._renderable = ClakRenderable(state)
+        self._animation_timer = None
 
     def render(self):
         self._renderable = ClakRenderable(self.state)
@@ -96,15 +116,53 @@ class ClakView(Static):
         else:
             outcome = self.state.handle_event(TuiEvent(key=key_from_textual(event)))
         event.stop()
+        self._present_outcome(outcome)
+
+    def on_paste(self, event: events.Paste) -> None:
+        outcome = self.state.handle_event(TuiEvent(paste=event.text))
+        event.stop()
+        self._present_outcome(outcome)
+
+    def on_script_updated(self, message: ScriptUpdated) -> None:
+        self._present_outcome(self.state.apply_run_update(message.runner, message.update))
+
+    def _present_outcome(self, outcome: TuiOutcome) -> None:
         if outcome == TuiOutcome.QUIT:
             self.app.exit()
             return
         self._refresh_after_state_change()
 
     def _refresh_after_state_change(self) -> None:
+        runner = self.state.take_pending_runner()
+        if runner is not None:
+            self.run_worker(
+                lambda: runner.run(
+                    lambda update: self.post_message(ScriptUpdated(runner, update))
+                ),
+                thread=True,
+                name=f"script:{runner.script_id}",
+            )
+        self._sync_animation()
         self.refresh()
-        self.state.after_present()
-        self._update_cursor()
+        self.call_after_refresh(self._update_cursor)
+
+    def _sync_animation(self) -> None:
+        if self._animation_timer is None:
+            return
+        if self.state.is_progress_animated():
+            self._animation_timer.resume()
+        else:
+            self._animation_timer.pause()
+
+    def _animate_progress(self) -> None:
+        self._sync_animation()
+        if self.state.is_progress_animated():
+            self.refresh()
+            self.call_after_refresh(self._update_cursor)
+
+    def on_unmount(self) -> None:
+        if self.state.runner is not None:
+            self.state.runner.cancel()
 
     def on_mount(self) -> None:
         self.focus()
@@ -112,6 +170,9 @@ class ClakView(Static):
         self.state.terminal_height = self.size.height
         self._update_cursor()
         self.set_interval(60, self._tick)
+        self._animation_timer = self.set_interval(
+            theme.PROGRESS_ANIMATION_INTERVAL_SECONDS, self._animate_progress, pause=True
+        )
 
     def _tick(self) -> None:
         self.state.tick()
@@ -136,7 +197,7 @@ class ClakApp(App):
     }
     """
 
-    BINDINGS = [("ctrl+q", "quit", "退出")]
+    BINDINGS = [Binding("ctrl+q", "quit", "退出", priority=True)]
 
     def __init__(self, app: Clak | None = None) -> None:
         super().__init__(ansi_color=True)
@@ -146,7 +207,8 @@ class ClakApp(App):
         yield ClakView(self.state)
 
     def action_quit(self) -> None:
-        self.exit()
+        outcome = self.state.request_quit()
+        self.query_one(ClakView)._present_outcome(outcome)
 
 
 def run_tui(app: Clak | None = None) -> None:

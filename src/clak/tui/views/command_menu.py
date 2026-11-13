@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from rich.cells import cell_len
 from rich.console import RenderResult
 from rich.segment import Segment
 from rich.style import Style
-from wcwidth import wcwidth
 
 from clak.runtime.slash import SlashMatch, SlashTokenKind
 from clak.tui import theme
+from clak.tui.views.text import fit_line, truncate_cells
 
 OVERLAY_MAX_LINES = 10
 
@@ -51,7 +52,7 @@ def render_command(
         for index, item in enumerate(state.matches):
             mark = ">" if index == state.selected else " "
             body_lines.append((mark, item))
-    border = f"─ {title} " + "─" * max(0, width - len(title) - 4)
+    border = f"─ {title} " + "─" * max(0, width - cell_len(title) - 3)
     inner_h = max(0, height - 2)
     rows = [border] + body_lines[:inner_h] + ["─" * width]
     for row in rows[:height]:
@@ -59,37 +60,24 @@ def render_command(
             mark, item = row
             yield from _render_match_row(mark, item, width)
         else:
-            yield Segment(row[:width].ljust(width), Style())
+            yield from fit_line([Segment(row, Style())], width)
         yield Segment.line()
 
 
 def _render_match_row(mark: str, item: SlashMatch, width: int) -> RenderResult:
     if width <= 0:
         return
-    selected = mark == ">"
+    is_selected = mark == ">"
     base_style = (
         Style(color=theme.MENU_SELECTED, bold=True)
-        if selected
+        if is_selected
         else Style(color=theme.MENU_NORMAL)
     )
     highlight_style = base_style + Style(color=theme.COMMAND_MATCH)
-    segments: list[Segment] = []
-    consumed = 0
-
-    def append(text: str, style: Style) -> None:
-        nonlocal consumed
-        for char in text:
-            char_width = max(1, wcwidth(char) or 0)
-            if consumed + char_width > width:
-                return
-            segments.append(Segment(char, style))
-            consumed += char_width
-
-    append(f"{mark} ", base_style)
-    matched = set(item.matched_indices)
-    for index, char in enumerate(item.label):
-        append(char, highlight_style if index in matched else base_style)
-    append(f" — {item.description}", base_style)
-    if consumed < width:
-        segments.append(Segment(" " * (width - consumed), base_style))
-    yield from segments
+    text = truncate_cells(f"{mark} {item.label} — {item.description}", width)
+    matched = {index + 2 for index in item.matched_indices}
+    segments = [
+        Segment(char, highlight_style if index in matched else base_style)
+        for index, char in enumerate(text)
+    ]
+    yield from fit_line(segments, width, base_style)

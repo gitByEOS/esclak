@@ -6,10 +6,10 @@ from typing import Literal
 
 from clak.application import Clak, FooterViewData
 from clak.runtime.ask import AskRequest
-from clak.runtime.errors import ScriptError
 from clak.runtime.output import OutputView
-from clak.runtime.params import ScriptInputs
-from clak.runtime.session import Session
+from clak.runtime.session import SessionResult, SessionSnapshot, SessionState
+from clak.tui.views.progress import ProgressStatus, ProgressViewData
+from clak.tui.runner import RunState, RunUpdate, ScriptRunner
 from clak.tui.views import ask as ask_view
 from clak.tui.views import footer as footer_view
 from clak.tui.views.ask_controller import AskUiBindings, handle_ask_key, sync_view_for_request
@@ -28,12 +28,20 @@ class TuiState:
         self.input_view = InputView()
         self.history_view = HistoryView()
         self.command_view = CommandViewState()
+        self._input_history: list[str] = []
+        self._history_position: int | None = None
         self.terminal_width = 80
         self.terminal_height = 24
         self.ask_view = AskViewState()
         self._ask_field_id: str | None = None
-        self._deferred_ask_wire: str | None = None
-        self.session: Session | None = None
+        self.runner: ScriptRunner | None = None
+        self._pending_runner: ScriptRunner | None = None
+        self.run_state: RunState | None = None
+        self._pending_request: AskRequest | None = None
+        self._output_view: OutputView | None = None
+        self._is_exit_requested = False
+        self._session_snapshot: SessionSnapshot | None = None
+        self._progress_title = ""
         self.primary: Literal["input", "ask"] = "input"
         self.overlay: Literal["none", "command"] = "none"
         self.started_at = time.monotonic()
@@ -49,13 +57,36 @@ class TuiState:
         return int(time.monotonic() - self.started_at)
 
     def tick(self) -> None:
-        """每秒由定时器触发，刷新 footer_line 中的运行时长。"""
+        """每分钟刷新底栏运行时长。"""
         self._sync_surface()
 
-    def script_ask_request(self) -> AskRequest | None:
-        if not self.session or not self.session.is_awaiting_input:
+    def progress_data(self, now: float | None = None) -> ProgressViewData | None:
+        snapshot = self._session_snapshot
+        if snapshot is None:
             return None
-        return self.session.pending_request
+        end = snapshot.finished_at
+        if end is None:
+            end = time.monotonic() if now is None else now
+        statuses = {
+            SessionResult.COMPLETED: ProgressStatus.COMPLETED,
+            SessionResult.FAILED: ProgressStatus.FAILED,
+            SessionResult.CANCELLED: ProgressStatus.CANCELLED,
+        }
+        status = statuses.get(snapshot.result, ProgressStatus.RUNNING)
+        if self.run_state == RunState.STOPPING:
+            status = ProgressStatus.STOPPING
+        elif snapshot.state in (SessionState.AWAITING_INPUT, SessionState.PAUSED):
+            status = ProgressStatus.WAITING
+        return ProgressViewData(
+            self._progress_title, max(0, end - snapshot.started_at), snapshot.progress, status,
+        )
+
+    def is_progress_animated(self) -> bool:
+        data = self.progress_data()
+        return data is not None and data.status in (ProgressStatus.RUNNING, ProgressStatus.STOPPING)
+
+    def script_ask_request(self) -> AskRequest | None:
+        return self._pending_request
 
     def is_ask_choosing(self) -> bool:
         return self.script_ask_request() is not None
@@ -69,23 +100,42 @@ class TuiState:
         custom = ask_view.custom_choice_index(request)
         return custom is not None and self.ask_view.selected == custom
 
-    def after_present(self) -> None:
-        wire = self._deferred_ask_wire
-        if not wire or not self.session:
-            return
-        request = self.session.pending_request
-        if not request:
-            self._deferred_ask_wire = None
-            return
-        try:
-            self.session.provide_input(request.field_id, wire)
-        except (ScriptError, ValueError) as error:
-            self.session.cancel()
-            self.session = None
-            self.history_view.push(HistoryEntryKind.ERROR, str(error))
-        self._deferred_ask_wire = None
+    def take_pending_runner(self) -> ScriptRunner | None:
+        runner = self._pending_runner
+        self._pending_runner = None
+        return runner
+
+    def apply_run_update(self, runner: ScriptRunner, update: RunUpdate) -> TuiOutcome:
+        if runner is not self.runner:
+            return TuiOutcome.REDRAW
+        self._output_view.lines[:] = update.lines
+        if update.session is not None:
+            self._session_snapshot = update.session
+            self._progress_title = update.title or runner.script_id
+        if update.state == RunState.FINISHED:
+            self.history_view.detach(self._output_view)
+            self._output_view = None
+            self._pending_request = None
+            self.runner = None
+            self.run_state = None
+            self._session_snapshot = None
+            self._progress_title = ""
+            if update.error:
+                self.history_view.push(HistoryEntryKind.ERROR, update.error)
+            if self._is_exit_requested:
+                return TuiOutcome.QUIT
+        elif update.state is not None and self.run_state != RunState.STOPPING:
+            self.run_state = update.state
+            self._pending_request = update.request
         self._sync_ask_view()
         self._sync_surface()
+        return TuiOutcome.REDRAW
+
+    def request_quit(self) -> TuiOutcome:
+        if self.runner is None:
+            return TuiOutcome.QUIT
+        self._is_exit_requested = True
+        return self._cancel_script()
 
     def role_style(self, role: str) -> tuple[str, str]:
         return role_style(role)
@@ -130,6 +180,10 @@ class TuiState:
             self.footer_line = self._overlay_footer(overlay)
         elif primary == "ask":
             self.footer_line = self._ask_footer()
+        elif self.run_state == RunState.STOPPING:
+            self.footer_line = "正在停止，等待当前步骤结束"
+        elif self.runner is not None:
+            self.footer_line = "脚本运行中 · Ctrl+C 停止 · Ctrl+Q 停止后退出"
 
     def _primary_footer(self, primary: Literal["input", "ask"]) -> str:
         if primary == "input":
@@ -163,15 +217,10 @@ class TuiState:
             return TuiOutcome.REDRAW
 
         if event.paste is not None:
-            if self.is_ask_typing():
-                text = event.paste.replace("\n", "")
-                if ask_view.is_filter(self.script_ask_request()):
-                    self.ask_view.query += text
-                    self.ask_view.selected = 0
-                else:
-                    self.input_view.insert_at_cursor(text, self.terminal_width)
-                return TuiOutcome.REDRAW
-            self.input_view.insert_at_cursor(event.paste, self.terminal_width)
+            text = event.paste.replace("\r\n", "\n").replace("\r", "\n")
+            if self.is_ask_choosing():
+                return self._paste_ask(text.replace("\n", ""))
+            self.input_view.insert_at_cursor(text, self.terminal_width)
             self._refresh_command_view()
             return TuiOutcome.REDRAW
 
@@ -179,8 +228,14 @@ class TuiState:
             return TuiOutcome.REDRAW
 
         key = event.key
+        if key.kind == "char" and key.char == "c" and key.ctrl and self.runner is not None:
+            return self._cancel_script()
         if self.is_ask_choosing():
             return self._dispatch_ask_key(key)
+
+        outcome = self._handle_history_key(key)
+        if outcome is not None:
+            return outcome
 
         if self.command_view.open:
             outcome = self._handle_command_key(key)
@@ -191,6 +246,16 @@ class TuiState:
         if outcome is not None:
             return outcome
 
+        return TuiOutcome.REDRAW
+
+    def _paste_ask(self, text: str) -> TuiOutcome:
+        if not self.is_ask_typing():
+            return TuiOutcome.REDRAW
+        if ask_view.is_filter(self.script_ask_request()):
+            self.ask_view.query += text
+            self.ask_view.selected = 0
+        else:
+            self.input_view.insert_at_cursor(text, self.terminal_width)
         return TuiOutcome.REDRAW
 
     def _ask_bindings(self) -> AskUiBindings | None:
@@ -216,18 +281,44 @@ class TuiState:
         return outcome if outcome is not None else TuiOutcome.REDRAW
 
     def _submit_ask_wire(self, wire: str) -> TuiOutcome:
+        request = self._pending_request
+        if request is None or self.runner is None:
+            return TuiOutcome.REDRAW
         self.history_view.push(HistoryEntryKind.USER, wire)
-        self._deferred_ask_wire = wire
+        self.runner.provide_input(request.field_id, wire)
+        self._pending_request = None
+        self.run_state = RunState.RUNNING
         self.ask_view = AskViewState()
         return TuiOutcome.REDRAW
 
     def _cancel_script(self) -> TuiOutcome:
-        if self.session:
-            self.session.cancel()
-            self.session = None
-        self._deferred_ask_wire = None
-        self.ask_view = AskViewState()
-        self.history_view.push(HistoryEntryKind.SYSTEM, "已中断脚本，返回主界面")
+        if self.runner is not None and self.run_state != RunState.STOPPING:
+            self.runner.cancel()
+            self.run_state = RunState.STOPPING
+            self._pending_request = None
+            self.ask_view = AskViewState()
+            self.history_view.push(HistoryEntryKind.SYSTEM, "已请求停止，等待当前步骤结束")
+        return TuiOutcome.REDRAW
+
+    def _handle_history_key(self, key: TuiKey) -> TuiOutcome | None:
+        is_browsing = self._history_position is not None
+        if key.kind == "escape" and is_browsing:
+            self._history_position = None
+            self.input_view.take()
+            self._refresh_command_view()
+            return TuiOutcome.REDRAW
+        if key.kind not in ("up", "down"):
+            return None
+        if not is_browsing and (not self.input_view.is_empty() or key.kind == "down"):
+            return None
+        if not self._input_history:
+            return TuiOutcome.REDRAW
+        position = len(self._input_history) if not is_browsing else self._history_position
+        position = max(0, min(len(self._input_history), position + (-1 if key.kind == "up" else 1)))
+        self._history_position = position if position < len(self._input_history) else None
+        line = self._input_history[position] if self._history_position is not None else ""
+        self.input_view.set(line, self.terminal_width)
+        self._refresh_command_view()
         return TuiOutcome.REDRAW
 
     def _handle_command_key(self, key: TuiKey) -> TuiOutcome | None:
@@ -271,6 +362,11 @@ class TuiState:
             )
 
     def _handle_input_key(self, key: TuiKey) -> TuiOutcome | None:
+        if key.kind == "escape":
+            self._history_position = None
+            self.input_view.take()
+            self._refresh_command_view()
+            return TuiOutcome.REDRAW
         if key.kind == "char" and key.char == "c" and key.ctrl:
             return self._handle_ctrl_c()
         if key.kind == "enter" and not self.command_view.open:
@@ -308,8 +404,11 @@ class TuiState:
         return None
 
     def _handle_ctrl_c(self) -> TuiOutcome:
+        if self.runner is not None:
+            return self._cancel_script()
         if self.input_view.is_empty():
             return TuiOutcome.QUIT
+        self._history_position = None
         self.input_view.take()
         self._refresh_command_view()
         self._refresh_input_footer()
@@ -318,10 +417,12 @@ class TuiState:
     def _submit_line(self) -> TuiOutcome:
         raw = self.input_view.take()
         line = raw.rstrip()
+        self._history_position = None
         self._refresh_command_view()
         if not line.strip():
             self._refresh_input_footer()
             return TuiOutcome.REDRAW
+        self._input_history.append(line)
         if line.startswith("/"):
             return self._dispatch_slash_line(line)
         if _is_command_query(line):
@@ -332,12 +433,15 @@ class TuiState:
         result = self.slash_engine.dispatch(line)
         match result.action:
             case SlashAction.QUIT:
-                return TuiOutcome.QUIT
+                return self.request_quit()
             case SlashAction.RUN_SCRIPT:
                 if result.command:
                     self._start_script(result.command)
             case SlashAction.NEW_SESSION:
                 self.history_view.clear()
+                if self.runner is None:
+                    self._session_snapshot = None
+                    self._progress_title = ""
             case SlashAction.SHOW_STATUS | SlashAction.NONE:
                 pass
             case SlashAction.UNKNOWN:
@@ -352,35 +456,16 @@ class TuiState:
         return TuiOutcome.REDRAW
 
     def _start_script(self, script_id: str) -> None:
-        script = self.app.create_script(script_id)
-        if not script:
-            self.history_view.push(HistoryEntryKind.ERROR, f"未知脚本: {script_id}")
+        if self.runner is not None:
+            self.history_view.push(HistoryEntryKind.SYSTEM, "请等待当前脚本结束后再执行")
             return
-        output_view = script.output
-        self.history_view.attach(output_view)
-        session = Session(
-            output_view,
-            inputs=ScriptInputs(allow_defaults=False),
-        )
-        session.on_exit(lambda: self._clear_session(session, script))
-        self.session = session
-        try:
-            script.on_enter(session)
-            script.run()
-        except (NotImplementedError, ScriptError, ValueError) as error:
-            session.cancel()
-            self.history_view.push(HistoryEntryKind.ERROR, str(error))
-            return
-        if self.script_ask_request():
-            self.ask_view, self._ask_field_id = sync_view_for_request(
-                self.script_ask_request(), self._ask_field_id, self.ask_view
-            )
-
-    def _clear_session(self, session: Session, script) -> None:
-        script.on_exit()
-        self.history_view.detach(script.output)
-        if self.session is session:
-            self.session = None
+        self._session_snapshot = None
+        self._progress_title = ""
+        self.runner = ScriptRunner(self.app, script_id)
+        self._pending_runner = self.runner
+        self.run_state = RunState.RUNNING
+        self._output_view = OutputView()
+        self.history_view.attach(self._output_view)
 
     def _run_prompt(self, prompt: str) -> TuiOutcome:
         self.history_view.push(HistoryEntryKind.USER, prompt)
@@ -388,7 +473,7 @@ class TuiState:
         return TuiOutcome.REDRAW
 
     def _refresh_command_view(self) -> None:
-        self.command_view.open = _is_command_query(self.input_view.input)
+        self.command_view.open = self._history_position is None and _is_command_query(self.input_view.input)
         if not self.command_view.open:
             self.command_view.selected = 0
             self.command_view.matches.clear()

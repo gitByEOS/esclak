@@ -58,13 +58,13 @@ def test_release_check_returns_script_failure_code():
     assert "发现不兼容资源" in run.text
 
 
-def test_release_check_failure_is_shown_in_tui():
+def test_release_check_failure_is_shown_in_tui(tui_driver):
     from clak.tui.event import TuiEvent, TuiKey
-    from clak.tui.state import TuiState
 
-    state = TuiState(app)
-    state._start_script("verify-release")
+    driver = tui_driver(app)
+    state = driver.state
+    driver.start("verify-release")
     state.handle_event(TuiEvent(key=TuiKey("char", char="2")))
-    state.after_present()
-    assert state.session is None
+    driver.wait()
+    assert state.runner is None
     assert "发布检查失败" in state.history_view.display()

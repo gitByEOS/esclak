@@ -10,6 +10,7 @@ from clak.tui.views import command_menu as command_view_mod
 from clak.tui.views import footer as footer_view_mod
 from clak.tui.views import history as history_view_mod
 from clak.tui.views import input as input_view_mod
+from clak.tui.views import progress as progress_view_mod
 from clak.tui.state import TuiState
 
 FOOTER_HEIGHT = 1
@@ -28,6 +29,7 @@ class ViewLayout:
     history_height: int
     overlay_height: int
     input_height: int
+    progress_height: int = 0
 
 
 @dataclass
@@ -67,8 +69,13 @@ def compute_layout(area_width: int, area_height: int, state: TuiState) -> ViewLa
             continue
         input_block = INPUT_MIN_HEIGHT + INPUT_BORDER_ROWS
         break
-    history_height = max(1, height - input_block - overlay_block - FOOTER_HEIGHT)
-    return ViewLayout(history_height, overlay_block, input_block)
+    input_block = min(input_block, max(0, height - FOOTER_HEIGHT))
+    available = max(0, height - input_block - overlay_block - FOOTER_HEIGHT)
+    progress_block = min(
+        progress_view_mod.progress_height(state.progress_data()), max(0, available - 1)
+    )
+    history_height = available - progress_block
+    return ViewLayout(history_height, overlay_block, input_block, progress_block)
 
 
 def _overlay_block_height(state: TuiState) -> int:
@@ -97,6 +104,12 @@ class ClakRenderable:
             self.state.history_view, width, layout.history_height
         )
         y += layout.history_height
+
+        if layout.progress_height > 0:
+            yield from progress_view_mod.render_progress(
+                self.state.progress_data(), width, layout.progress_height
+            )
+            y += layout.progress_height
 
         if layout.overlay_height > 0:
             yield from command_view_mod.render_command(

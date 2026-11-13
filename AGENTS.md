@@ -1,36 +1,146 @@
-# AGENTS.md — clak 三方库接入指南
+# AGENTS.md — esclak 项目维护指南
 
-clak 不承载业务脚本。业务项目创建 `Clak`，并注册自己的 Script 子类。
+本文件面向维护本仓库的开发者与编码 Agent，规定如何修改、验证、记录、提交与发版。它不是业务工具接入教程：使用 `esclak` 编写工具，请阅读 [README](README.md)；Agent 使用指南见 [skills/clak](skills/clak/SKILL.md)。
 
-```python
-from clak import Clak, Script, Session
+## 1. 文档职责与更新时间
 
+| 文件 | 服务对象与职责 | 何时必须修改 | 不应承载 |
+|---|---|---|---|
+| `AGENTS.md` | 项目维护者与编码 Agent，约束开发和交付流程 | 项目结构、维护规则、验证或交付流程变化时 | 重复的业务接入教程、技术实现细节 |
+| `docs/tech.md` | 框架设计原则与技术契约，约束代码职责、数据流、状态和边界 | 修改代码时必须同轮核对并同步相关设计说明，不得等到提交或发版再补 | 与实现脱节的愿景、普通操作步骤 |
+| `README.md` | 未参与项目的开发者，快速了解项目、安装、接入和操作 | 与代码同步；公开 API、行为、命令、安装或示例变化时立即更新 | 内部状态机、线程协议、精确渲染算法 |
+| `examples/dev_tools/README.md` | 使用示例的人，说明业务场景、入口和可观察结果 | 示例代码或操作路径变化时，与代码同轮更新 | 另一套框架设计契约 |
+| `skills/clak/` | 面向 Agent 的使用 skill，教 Agent 用 `esclak` 编写自己的工具 | **仅在用户要求提交时**核对并同步 `SKILL.md` 与随附参考实现 | 日常开发流水、维护本仓库的规则 |
+| `docs/task.md` | task-polling 唯一任务状态与完成记录源 | 领取、完成、返工时按规范流转；修改完成并验证后必须记录 | 发布文案、重复任务 JSON |
+| `CHANGELOG.md` | 面向使用者的版本变更摘要 | **仅在发版时**根据任务记录整理 | 每轮开发日志、尚未验收的改动 |
 
-class DeployScript(Script):
-    name = "/deploy"
-    description = "发布服务"
+技术契约只在 [docs/tech.md](docs/tech.md) 维护，README 和示例以使用角度描述并链接技术文档，不复制内部设计。设计原则未变化时应明确核对结果，不为凑同步记录制造无意义文字改动。
 
-    def run(self, session: Session) -> None:
-        def deploy() -> int:
-            self.output.push("发布完成")
-            return 0
+## 2. 项目结构与核心边界
 
-        session.bind_exec_end()
-        session.exec_list.add(True, deploy, "deploy")
-        session.run()
+| 路径 | 职责 |
+|---|---|
+| `src/clak/application.py`、`cli.py` | 应用注册与 TUI/无头入口 |
+| `src/clak/commands/` | Script 定义、命令元数据与内置命令 |
+| `src/clak/runtime/` | 会话、执行队列、问答、输出与无头运行 |
+| `src/clak/tui/` | 线程适配、状态缓存、布局与视图 |
+| `examples/dev_tools/` | 使用公共 API 的业务工具示例 |
+| `tests/` | 队列、会话、业务、纯渲染和真实 TUI 回归 |
+| `docs/` | 设计原则与任务状态 |
+| `skills/clak/` | 提交时同步的 Agent 使用资产 |
 
+修改前先读 [设计原则](docs/tech.md)，再定位目标模块及测试，不从界面症状直接猜测运行时原因。关键不变量：
 
-app = Clak(status="发布工具")
-app.register(DeployScript)
+- clak 是固定流程脚本聚合器，TUI 与无头复用业务脚本，不擅自引入远程平台或智能体框架
+- `ExecList` 只执行并 notify，`Session` 统一管理状态、进度、时间与快照；Runner 仅转发，TUI 仅渲染
+- 每次运行隔离 Script、OutputView、Session 与队列，不共享运行实例
+- 业务、步骤和生命周期在约定线程串行执行，禁止直接跨线程修改 Widget
+- 取消不等于强杀线程或子进程，当前调用返回后才安全收尾；业务资源和最终会话事实不得因界面清理丢失
+- 信任边界校验、退出码、错误隔离与资源清理不能为了少写代码而省略
 
-if __name__ == "__main__":
-    app.run_cli(prog="dev-tools")
+## 3. 普通修改流程
+
+```text
+读取任务与设计 → 明确目标/验收 → 回归先失败 → 最小实现
+                                             ↓
+                                  同步 tech/README/示例
+                                             ↓
+                                   定向验证 → 全量回归
+                                             ↓
+                                      docs/task.md
 ```
 
-每次执行都会创建新的 Script 和 `self.output`。默认 `self.output.push()` 为每行追加 `[脚本名] ` 前缀；TUI 会在 `on_enter` 挂载输出，在完成或中断后调用 `on_exit` 脱离。
+1. 先执行 `git status --short`，识别已有修改与他人产物，不覆盖、不清理、不混入本轮任务
+2. 明确本轮目标、影响模块与可验证结果；多步计划写入项目 `.claude/plan.md`
+3. 修改行为前先写能够复现问题的测试；遵守现有风格，只改与任务直接相关的代码
+4. 改代码时同步 `docs/tech.md` 的相关原则与契约，使用者可见变化同步 README，示例变化同步示例说明
+5. 先运行定向测试，再全量回归并检查 diff；失败不能标已完成
+6. 将本轮任务理解、真实改动目录写入 `docs/task.md`，保留旧轮次与初始环境
+7. 普通修改到此结束：**不更新 skill、不更新 CHANGELOG、不擅自提交或发版**
 
-业务项目从自己的入口执行：`python -m dev_tools` 或 `python -m dev_tools exec /deploy`。全局 `clak` 入口只包含内置命令。TUI 主输入区可直接输入字母模糊搜索命令，`Enter` 执行候选，`Tab` 补全，`Esc` 清空搜索。
+## 4. 验证要求
 
-`session.exec_list` 是本次运行专属的执行队列：任务返回 `0` 表示同步继续，非零表示挂起而不是失败。调用 `session.bind_exec_end()` 绑定完成清理；业务失败抛出 `ScriptError`，参数格式错误抛出 `ValueError`。常用业务类型从 `clak` 顶层导入。
+安装开发依赖与运行测试：
 
-验证：`python3 -m pip install -e ".[dev]" && python3 -m pytest`
+```bash
+python3 -m pip install -e ".[dev]"
+python3 -m pytest -q
+```
+
+交互或运行时改动还要验证示例入口与对应边界：
+
+```bash
+python3 -m examples.dev_tools
+python3 -m examples.dev_tools exec /verify-release --set outcome=success
+python3 -m examples.dev_tools exec /verify-release --set outcome=failure
+```
+
+成功、业务失败、参数失败应分别符合 `0`、业务指定码、`2` 的退出语义。涉及取消或资源时验证清理恰好一次，涉及 TUI 时覆盖输入、窄屏、动画和运行结束后的展示清理；具体分层矩阵见 [技术验证策略](docs/tech.md#9-验证策略)。
+
+纯文档任务检查内容准确性、本地链接、代码块与相关配置，不必为无代码变化反复运行完整 TUI 测试。所有任务都要检查 `git diff --check`，只报告真实执行的验证；没有验证的构建或发布不得宣称成功。
+
+## 5. task-polling 任务记录
+
+`docs/task.md` 是唯一任务文件，不另建根目录 `task.md` 或外部 JSON。固定结构：
+
+```text
+# 任务计划
+## 未领取
+## 进行中
+## 已完成
+## 远期规划
+## 确认不做
+```
+
+任务遵守以下规则：
+
+- 使用唯一 ID，例如 `TASK-001`；未领取只写目标，不预填虚构执行结果
+- 同时最多一个进行中任务；领取时在任务行写初始环境短 commit，此后不得修改
+- 完成后移入已完成并标 `[x]`，轮次写 Agent 对任务的理解和 `<dirs:目录;目录;>`
+- 根目录文件使用文件名，子目录记录实际改动目录；点开头目录、构建产物和任务文件自身不计入
+- 返工从已完成移回进行中，未通过原因追加到上一轮，再新增本轮理解；不要先假完成再返工
+- `远期规划` 与 `确认不做` 由用户维护，不自动领取；已完成记录不可擅自删除，是发版依据
+
+```markdown
+- [x] TASK-001 [a1b2c3d]: 完善项目维护规则
+  - 轮次1：统一设计文档与使用说明的同步边界；<dirs:AGENTS.md;README.md;docs;>
+```
+
+使用 `task-polling` skill 时先 `status`，领取用 `claim`，完成/返工分别按 `complete` / `reopen` 协议执行。仅用户要求轮询时才启动 `/loop`，不要因为记一条完成记录就创建轮询或 Cron。
+
+**混合工作区边界**：当前 task-polling 的 `complete` 会自动暂存它发现的所有待改开发目录。运行前必须确认这些目录全部属于本轮；存在前序改动或他人产物时，不得用它批量 `git add -A`。此时保留同一 Markdown 格式，精确记录本轮理解与目录，并使用只读 `status` / 文档解析验证，不修改全局 skill、不暂存无关文件、不宣称已提交。
+
+## 6. 用户要求提交时
+
+```text
+核对本次任务与diff → 同步 skills/clak → 验证 skill参考实现
+                                          ↓
+                              同步任务完成记录 → 精确暂存 → 提交
+```
+
+只有用户明确要求提交才执行：
+
+1. 以本次提交的有效代码、README 和技术契约为准，核对 `skills/clak/SKILL.md`
+2. 同步 `skills/clak/references/` 中受影响的参考实现，确保 Agent 只依赖 `esclak` 就能构建自己的工具，不依赖本仓内部路径
+3. 不更新无关 skill 内容；当前提交未改变 skill 使用契约时记录核对结果，不伪造改动
+4. 验证 skill 中的命令、示例、输入/失败/清理约定与实际 API 一致，再记录本轮提交准备任务
+5. 仅暂存本次提交范围，检查 staged diff；在默认分支需要提交时先建工作分支
+6. 提交授权不等于推送或发布授权，不自动执行后续外部操作
+
+## 7. 用户要求发版时
+
+```text
+确定版本范围 → 回顾 docs/task.md 已完成项 → 核对实际diff与验证
+                                                    ↓
+                                    整理 CHANGELOG → 更新版本
+                                                    ↓
+                                        构建验收 → 经授权发布
+```
+
+- 根据上次发布到本次版本范围内的已完成任务、各轮理解与真实改动目录整理 CHANGELOG，按使用者可见能力、修复、行为变化和迁移注意事项归纳
+- 不把未领取、进行中、远期规划、确认不做写成已发布能力，不把同一任务多轮返工重复计数
+- task 记录不自动证明发布范围：对照代码、提交与版本差异核实；记录缺口要标明并补证据，不虚构历史任务或时间
+- 默认保留任务完成记录，不以“已写 CHANGELOG”为由自行删除；用户明确要求清理时，先将完成任务、全部轮次与补录说明完整归档至对应版本 CHANGELOG 并核对数量，再清空已完成区段，保留未完成/远期内容和五段结构
+- 版本唯一来源是 `src/clak/__init__.py` 的 `__version__`，`pyproject.toml` 动态读取；同步 CHANGELOG 的版本与实际日期
+- 若发版包含提交，仍须执行提交阶段的 skill 同步与验证；构建、发布与推送分别遵守用户授权
+- 构建或发布失败时如实记录，不提前宣称版本已上线
